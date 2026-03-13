@@ -14,7 +14,6 @@ The app requires Internet access solely to receive real-time earthquake data fro
 The app requests permissions for "Alarm Volume" and "Background Execution" exclusively to provide high-priority alerts for earthquake warnings.
 
 ### 4. Third-Party Services
-We use data from Wolfx. Please refer to their privacy policy for data handling on their side: https://wolfx.jp/privacy_policy_zh
-
+We use data from Wolfx. Please refer to their privacy policy for data handling on their side: https://wolfx.jp/privacy_policy
 ### 5. Open Source
-As an open-source project, you are encouraged to audit our source code on GitHub: https://github.com/你的用户名/EEW-Receiver
+As an open-source project, you are encouraged to audit our source code on GitHub: https://github.com/evan8686/EEW-Receiver
