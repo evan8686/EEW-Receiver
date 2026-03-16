@@ -1,5 +1,6 @@
 # EEW-Receiver (地震预警接收器)
 ![EEW Receiver Banner](assets/mybanner.png)
+[![下载最新版本](https://img.shields.io/badge/下载-最新版本APK-success?style=for-the-badge&logo=android)](https://github.com/evan8686/EEW-Receiver/releases/latest)
 
 ### 📌 项目目的
 大陆的地震预警系统目前尚未接入 **台湾地区中央气象署（CWA）** 的地震预警。而作为受台湾地震影响明显的 福建/浙江 地区，经常有明显震感，却得不到任何预警。为了确保福建、浙江南部沿海城市的居民能及时收到预警，特别做了这个项目。
