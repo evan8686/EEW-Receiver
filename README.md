@@ -82,7 +82,7 @@
 本项目的数据源与灵感离不开以下开源项目与无私服务的支持：
 
 * **[Wolfx Project](https://wolfx.jp/)**：为本项目提供了稳定、快速且无私的地震预警 WebSocket API 转发服务。
-* **[kanameishi 要石](https://github.com/Lipomoea/kanameishi)**：为本项目的开发与数据源接入提供了优秀的参考与灵感。
+* **[kanameishi 要石](https://github.com/Lipomoea/kanameishi)**：为本项目的开发与数据源接入提供了优秀的参考与灵感。（要石 是一个电脑版的地震预警软件，非常推荐在电脑端安装）
 
 ---
 
