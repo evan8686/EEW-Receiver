@@ -9,6 +9,8 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -42,13 +44,11 @@ class AlertManager(private val context: Context) {
     }
 
     fun triggerAlert(eewData: EewData, threshold: Double = 3.0) {
-        // 🚨 完美适配 String 类型的 ID，使用 isNullOrEmpty() 判断
         if (eewData.id.isNullOrEmpty() || eewData.hypoCenter == null || eewData.hypoCenter == "null") {
             Log.d("EEW_Receiver", "拦截到无效或空数据，不执行通知逻辑。")
             return
         }
 
-        // 只要数据有效，第一时间将其保存到本地历史记录中！
         DataManager.saveHistory(context, eewData)
 
         val readableText = eewData.toReadableText()
@@ -76,7 +76,7 @@ class AlertManager(private val context: Context) {
         )
 
         val notification = NotificationCompat.Builder(context, EVENT_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert) // 如果你有自己的图标，可以替换这里
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(title)
             .setContentText("震级:${eewData.magnitude} / 烈度:${eewData.maxIntensity}")
             .setStyle(NotificationCompat.BigTextStyle().bigText(eewData.toReadableText()))
@@ -93,13 +93,11 @@ class AlertManager(private val context: Context) {
             mediaPlayer?.stop()
             mediaPlayer?.release()
 
-            // 1. 构建音频属性，强制指定走“闹钟”通道 (USAGE_ALARM)
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
 
-            // 2. 使用带有音频属性的 create 方法初始化 MediaPlayer
             mediaPlayer = MediaPlayer.create(
                 context,
                 R.raw.warn,
@@ -107,9 +105,16 @@ class AlertManager(private val context: Context) {
                 AudioManager.AUDIO_SESSION_ID_GENERATE
             )
 
+            // 🚨 V1.1.5: 循环播放两遍逻辑
+            var playCount = 0
             mediaPlayer?.setOnCompletionListener { mp ->
-                mp.release()
-                mediaPlayer = null
+                playCount++
+                if (playCount < 2) {
+                    mp.start() // 播放第二遍
+                } else {
+                    mp.release()
+                    mediaPlayer = null
+                }
             }
             mediaPlayer?.start()
         } catch (e: Exception) {
@@ -123,7 +128,8 @@ class AlertManager(private val context: Context) {
             PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
             "EEWReceiver::AlertWakeLock"
         )
-        wakeLock.acquire(30000L)
+        // 唤醒锁维持 60 秒 (与 UI 自动关闭时间对应)
+        wakeLock.acquire(60000L)
     }
 
     private fun vibratePhone() {
@@ -135,12 +141,19 @@ class AlertManager(private val context: Context) {
             context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         }
 
+        // 🚨 V1.1.5: 脉冲式震动逻辑 (震动 500ms, 停顿 500ms)
+        val pattern = longArrayOf(0, 500, 500)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createOneShot(2000, VibrationEffect.DEFAULT_AMPLITUDE))
+            vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0))
         } else {
             @Suppress("DEPRECATION")
-            vibrator.vibrate(2000)
+            vibrator.vibrate(pattern, 0)
         }
+
+        // 🚨 V1.1.5: 5秒后强制取消震动
+        Handler(Looper.getMainLooper()).postDelayed({
+            vibrator.cancel()
+        }, 5000)
     }
 
     private fun showLockScreenUI(eewText: String) {
