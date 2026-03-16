@@ -1,5 +1,6 @@
 # EEW-Receiver (地震预警接收器)
 ![EEW Receiver Banner](assets/mybanner.png)
+
 [![下载最新版本](https://img.shields.io/badge/下载-最新版本APK-success?style=for-the-badge&logo=android)](https://github.com/evan8686/EEW-Receiver/releases/latest)
 
 ### 📌 项目目的
