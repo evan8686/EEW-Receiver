@@ -51,15 +51,14 @@ class AlertManager(private val context: Context) {
 
         DataManager.saveHistory(context, eewData)
 
-        val readableText = eewData.toReadableText()
-
         if (eewData.magnitude >= threshold) {
             Log.d("EEW_Receiver", "震级 ${eewData.magnitude} >= $threshold，触发强警报！")
             sendEventNotification(eewData, "【强震预警】${eewData.hypoCenter}")
             wakeUpScreen()
             vibratePhone()
             playSound()
-            showLockScreenUI(readableText)
+            // 🚨 核心修改：直接将完整的 eewData 对象传给弹窗，方便 UI 层拆分显示
+            showLockScreenUI(eewData)
         } else {
             Log.d("EEW_Receiver", "震级 ${eewData.magnitude} < $threshold，仅发送详细通知。")
             sendEventNotification(eewData, "【地震速报】${eewData.hypoCenter}")
@@ -156,9 +155,14 @@ class AlertManager(private val context: Context) {
         }, 5000)
     }
 
-    private fun showLockScreenUI(eewText: String) {
+    // 🚨 核心修改：将 EewData 拆解为多个独立的参数装入 Intent
+    private fun showLockScreenUI(eewData: EewData) {
         val intent = android.content.Intent(context, LockScreenAlertActivity::class.java).apply {
-            putExtra("EEW_TEXT", eewText)
+            putExtra("EEW_MAGNITUDE", eewData.magnitude.toString())
+            putExtra("EEW_INTENSITY", eewData.maxIntensity ?: "未知")
+            putExtra("EEW_HYPOCENTER", eewData.hypoCenter ?: "未知")
+            putExtra("EEW_DEPTH", if (eewData.depth != null) "${eewData.depth}km" else "未知")
+            putExtra("EEW_TIME", eewData.originTime ?: "未知")
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
         context.startActivity(intent)
