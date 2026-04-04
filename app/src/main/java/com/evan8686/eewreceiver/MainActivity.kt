@@ -9,20 +9,25 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
@@ -130,48 +135,90 @@ fun SettingsScreen() {
     var threshold by remember { mutableStateOf(DataManager.getThreshold(context)) }
     var sourceList by remember { mutableStateOf(DataManager.getSources(context)) }
 
-    // 控制弹窗的状态
+    // 状态控制
     var showAddDialog by remember { mutableStateOf(false) }
+    var showHelpDialog by remember { mutableStateOf(false) } // 新增：帮助弹窗状态
+    var sourcesExpanded by remember { mutableStateOf(false) } // 新增：折叠面板状态
+
     var newSourceName by remember { mutableStateOf("") }
     var newSourceUrl by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())
     ) {
-        Text("预警设置", style = MaterialTheme.typography.titleLarge)
+        // 顶部标题栏：包含帮助按钮
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("预警设置", style = MaterialTheme.typography.titleLarge)
+            IconButton(onClick = { showHelpDialog = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Info, // 🚨 这里修改为自带的 Info 图标
+                    contentDescription = "帮助说明",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
-        // ================= 订阅源多选卡片 =================
+        // ================= 订阅源多选卡片 (折叠面板) =================
         Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("API 订阅源 (支持多选)", style = MaterialTheme.typography.titleMedium)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                sourceList.forEachIndexed { index, source ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                    ) {
-                        Checkbox(
-                            checked = source.isSelected,
-                            onCheckedChange = { isChecked ->
-                                val newList = sourceList.toMutableList()
-                                newList[index] = source.copy(isSelected = isChecked)
-                                sourceList = newList
-                            }
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { sourcesExpanded = !sourcesExpanded }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("API 订阅源 (支持多选)", style = MaterialTheme.typography.titleMedium)
+                        val selectedCount = sourceList.count { it.isSelected }
+                        Text(
+                            text = if (sourcesExpanded) "点击收起面板" else "已选择 $selectedCount 个数据源，点击配置",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline
                         )
-                        Column(modifier = Modifier.padding(start = 8.dp)) {
-                            Text(source.name, style = MaterialTheme.typography.bodyMedium)
-                            Text(source.url, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    }
+                    Icon(
+                        imageVector = if (sourcesExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = null
+                    )
+                }
+
+                AnimatedVisibility(visible = sourcesExpanded) {
+                    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                        sourceList.forEachIndexed { index, source ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            ) {
+                                Checkbox(
+                                    checked = source.isSelected,
+                                    onCheckedChange = { isChecked ->
+                                        val newList = sourceList.toMutableList()
+                                        newList[index] = source.copy(isSelected = isChecked)
+                                        sourceList = newList
+                                    }
+                                )
+                                Column(modifier = Modifier.padding(start = 8.dp)) {
+                                    Text(source.name, style = MaterialTheme.typography.bodyMedium)
+                                    Text(source.url, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                                }
+                            }
+                        }
+                        TextButton(onClick = { showAddDialog = true }, modifier = Modifier.padding(top = 8.dp)) {
+                            Text("+ 添加自定义源")
                         }
                     }
                 }
-
-                TextButton(onClick = { showAddDialog = true }, modifier = Modifier.padding(top = 8.dp)) {
-                    Text("+ 添加自定义源")
-                }
             }
         }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         // ================= 阈值卡片 =================
@@ -184,12 +231,12 @@ fun SettingsScreen() {
                 )
             }
         }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         // ================= 保存按钮 =================
         Button(
             onClick = {
-                // 拦截：如果不选任何源就不让保存
                 if (sourceList.none { it.isSelected }) {
                     Toast.makeText(context, "请至少勾选一个订阅源！", Toast.LENGTH_SHORT).show()
                     return@Button
@@ -212,7 +259,7 @@ fun SettingsScreen() {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // ================= 测试卡片 =================
+        // ================= 系统测试 =================
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("系统测试", style = MaterialTheme.typography.titleMedium)
@@ -221,7 +268,6 @@ fun SettingsScreen() {
                     onClick = {
                         val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
                         val currentTimeString = sdf.format(java.util.Date())
-
                         val dummyData = EewData(
                             id = System.currentTimeMillis().toString(),
                             reportTime = currentTimeString,
@@ -247,13 +293,11 @@ fun SettingsScreen() {
 
         Column(modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(
-                text = "该项目为个人测试项目，本人无软件开发经验。此 APP 由 Gemini 协助开发完成。仅供个人测试。",
+                text = "您安装的当前版本为1.2.0版本，您可随时访问Github仓库获取版本更新情况。该项目为个人测试项目，本人无软件开发经验。此 APP 由 Gemini 协助开发完成。仅供个人测试。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline
             )
-
             Spacer(modifier = Modifier.height(8.dp))
-
             val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
             val annotatedLinkString = androidx.compose.ui.text.buildAnnotatedString {
                 append("项目仓库：")
@@ -266,24 +310,76 @@ fun SettingsScreen() {
                 }
                 pop()
             }
-
             androidx.compose.foundation.text.ClickableText(
                 text = annotatedLinkString,
                 style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.outline),
                 onClick = { offset ->
                     annotatedLinkString.getStringAnnotations(tag = "URL", start = offset, end = offset)
-                        .firstOrNull()?.let { annotation ->
-                            uriHandler.openUri(annotation.item)
-                        }
+                        .firstOrNull()?.let { annotation -> uriHandler.openUri(annotation.item) }
                 }
             )
-
         }
     }
 
-    
+    // ================= 弹窗集合 =================
 
-    // ================= 添加自定义源的弹窗 =================
+    // 1. 帮助说明弹窗
+    if (showHelpDialog) {
+        AlertDialog(
+            onDismissRequest = { showHelpDialog = false },
+            title = {
+                Text(
+                    text = "EEW-Receiver 地震预警接收器\n配置说明",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                )
+            },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = "为了确保您能持续正常接收地震预警，此APP需维持后台保活，请务必按照以下说明进行配置。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text("1. 设置 - 通知 - EEW Receiver", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("• a. 开启“允许通知”，并将 “锁屏/横幅” 打勾。\n• b. 打开 “铃声/震动/允许打扰”（该项指即便手机处于免打扰模式时，应用仍能正常响铃和震动）。\n• c. 将“类别”下的 “地震预警事件” 设为允许通知，“地震预警后台监控”则维持默认的“静默通知”即可。", fontSize = 14.sp)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("2. 设置 - 应用管理 - EEW Receiver - 权限管理", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("• a. 锁屏显示：设为 “允许”。\n• b. 滚动页面到下方，进入 “其他权限” -> “特殊应用权限”：（您先进入这个页面，尝试调整权限，系统会提示您需要解锁限制）\n• c. 回到EEW Receiver - 权限管理 主界面，此时点击右上角新出现的 3 个点，选择 “解锁所有授权限制” 进行解除。\n• d. 回到“特殊应用权限”页面\n    * 悬浮窗：设为“允许”。\n    * 后台弹出界面：设为“允许”。\n    * 发送全屏通知：设为“允许”。", fontSize = 14.sp)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("3. 桌面多任务界面 - EEW Receiver - 锁定不清理", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("• a. 上滑呼出多任务界面\n• b. 找到 EEW Reveiver，点击 3 个点，选择 “锁定”  （即，在多任务窗口一键清理使用过的应用时，不会被杀掉）", fontSize = 14.sp)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("4. 耗电管理 - EEW Receiver - 完全允许后台行为", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("• a. 进入耗电管理相关的设置界面\n• b. 找到 EEW Reveiver，选择 “完全允许后台行为”", fontSize = 14.sp)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("5. 应用 - 自启动 - 允许 EEW Receiver 自启动", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "以上设置 以 OPPO ColorOS 16 为例，若您使用 小米澎湃OS，vivo OriginOS 等，请自行参考并在系统设置中操作相关选项。部分选项名称和入口在不同OS上可能略有差异，但基本类似。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showHelpDialog = false }) { Text("我知道了") }
+            }
+        )
+    }
+
+    // 2. 添加自定义源弹窗
     if (showAddDialog) {
         AlertDialog(
             onDismissRequest = { showAddDialog = false },
@@ -305,7 +401,6 @@ fun SettingsScreen() {
                 TextButton(onClick = {
                     if (newSourceName.isNotBlank() && newSourceUrl.isNotBlank()) {
                         val newList = sourceList.toMutableList()
-                        // 默认将新加的源设置为勾选状态
                         newList.add(ApiSource(newSourceName, newSourceUrl, true))
                         sourceList = newList
                         showAddDialog = false
