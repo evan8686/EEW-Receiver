@@ -23,13 +23,14 @@ import kotlinx.coroutines.delay
 
 class LockScreenAlertActivity : ComponentActivity() {
 
-    // 💡 核心魔法 1：独立管理每个字段的状态，确保多报文丝滑刷新且不影响局部 UI
+    // 💡 独立管理每个字段的状态
     private var magnitudeState = mutableStateOf("0.0")
     private var intensityState = mutableStateOf("未知")
     private var hypoCenterState = mutableStateOf("未知")
     private var depthState = mutableStateOf("未知")
     private var timeState = mutableStateOf("未知")
-    private var updateTriggerState = mutableStateOf(0L) // 用于触发倒计时重置的时间戳
+    private var reportNumState = mutableStateOf("1")
+    private var updateTriggerState = mutableStateOf(0L)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,11 +47,10 @@ class LockScreenAlertActivity : ComponentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // 初始化第一报的数据
+        // 初始化第一报数据
         updateDataFromIntent(intent)
 
         setContent {
-            // 💡 核心魔法 2：带 Key 的 LaunchedEffect，逻辑与之前完全一致
             LaunchedEffect(key1 = updateTriggerState.value) {
                 delay(60_000L)
                 clearScreenFlagsAndFinish()
@@ -76,7 +76,7 @@ class LockScreenAlertActivity : ComponentActivity() {
                     )
                     Spacer(modifier = Modifier.height(32.dp))
 
-                    // ================= 新增：半透明数据卡片 (Glassmorphism) =================
+                    // ================= 半透明数据卡片 =================
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -129,12 +129,12 @@ class LockScreenAlertActivity : ComponentActivity() {
                         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.2f)))
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // 详细参数 (使用全角空格实现垂直对齐)
-                        Text("震源地：${hypoCenterState.value}", color = Color.White, fontSize = 18.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("深　度：${depthState.value}", color = Color.White, fontSize = 18.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("时　间：${timeState.value}", color = Color.White, fontSize = 18.sp)
+                        // 🚨 核心排版重构：使用自定义的完美对齐组件
+                        // 你不再需要手动敲空格了，算法会自动让“深度”和“预警编号”变得一样宽！
+                        AlignedInfoRow(label = "预警编号", value = "第 ${reportNumState.value} 报")
+                        AlignedInfoRow(label = "震源地", value = hypoCenterState.value)
+                        AlignedInfoRow(label = "深度", value = depthState.value)
+                        AlignedInfoRow(label = "时间", value = timeState.value)
                     }
                     // ================= 卡片区域结束 =================
 
@@ -144,7 +144,7 @@ class LockScreenAlertActivity : ComponentActivity() {
                     Button(
                         onClick = { clearScreenFlagsAndFinish() },
                         colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                        shape = RoundedCornerShape(50), // 胶囊形状
+                        shape = RoundedCornerShape(50),
                         modifier = Modifier.fillMaxWidth(0.6f).height(50.dp)
                     ) {
                         Text(text = "我知道了", color = Color(0xFFC63A2F), fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -165,22 +165,20 @@ class LockScreenAlertActivity : ComponentActivity() {
         }
     }
 
-    // 💡 核心魔法 3：处理后续报文的推入
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
         intent?.let { updateDataFromIntent(it) }
     }
 
-    // 将解析 Intent 的逻辑抽取出来，方便 onCreate 和 onNewIntent 复用
     private fun updateDataFromIntent(intent: Intent) {
         magnitudeState.value = intent.getStringExtra("EEW_MAGNITUDE") ?: "0.0"
         intensityState.value = intent.getStringExtra("EEW_INTENSITY") ?: "未知"
         hypoCenterState.value = intent.getStringExtra("EEW_HYPOCENTER") ?: "未知"
         depthState.value = intent.getStringExtra("EEW_DEPTH") ?: "未知"
         timeState.value = intent.getStringExtra("EEW_TIME") ?: "未知"
+        reportNumState.value = intent.getStringExtra("EEW_REPORT_NUM") ?: "1"
 
-        // 更新时间戳，60秒倒计时瞬间重置
         updateTriggerState.value = System.currentTimeMillis()
     }
 
@@ -191,5 +189,26 @@ class LockScreenAlertActivity : ComponentActivity() {
                     WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
         )
         finish()
+    }
+}
+
+// 💡 新增：用于解决“强迫症不对齐”的专属 Compose 组件
+@Composable
+fun AlignedInfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        // 左侧容器：固定宽度，内部字符两端对齐
+        Row(
+            modifier = Modifier.width(72.dp), // 72dp 刚好完美放下4个 16sp 的汉字
+            horizontalArrangement = Arrangement.SpaceBetween // 核心魔法：字符自动均匀散开
+        ) {
+            label.forEach { char ->
+                Text(text = char.toString(), color = Color.White, fontSize = 16.sp)
+            }
+        }
+        // 右侧容器：冒号及内容绝对左对齐
+        Text(text = "：$value", color = Color.White, fontSize = 16.sp)
     }
 }
