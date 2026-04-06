@@ -15,6 +15,10 @@ data class ApiSource(
 object DataManager {
     private const val PREF_NAME = "eew_prefs"
 
+    // 🚨 核心修复 1：将 Gson 声明为单例
+    // 避免频繁创建重量级对象导致的 CPU 浪费和系统 GC 卡顿
+    private val gson = Gson()
+
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
     }
@@ -29,7 +33,7 @@ object DataManager {
 
     // 数据源保存 (支持多选列表)
     fun saveSources(context: Context, sources: List<ApiSource>) {
-        val json = Gson().toJson(sources)
+        val json = gson.toJson(sources) // 复用单例
         getPrefs(context).edit().putString("api_sources", json).apply()
     }
 
@@ -38,7 +42,7 @@ object DataManager {
         val json = getPrefs(context).getString("api_sources", null)
         if (json != null) {
             val type = object : TypeToken<List<ApiSource>>() {}.type
-            return Gson().fromJson(json, type)
+            return gson.fromJson(json, type) // 复用单例
         }
         return listOf(
             ApiSource("台湾中央气象署 (CWA)", "wss://ws-api.wolfx.jp/cwa_eew", true),
@@ -50,22 +54,41 @@ object DataManager {
     }
 
     // ========== 历史记录相关 ==========
+
+    // 🚨 核心修复 2：添加 @Synchronized 并发锁
+    // 防止多个 WebSocket 数据源同时接收到报文时，发生交叉写入导致记录丢失
+    @Synchronized
     fun saveHistory(context: Context, eewData: EewData) {
         val history = getHistory(context).toMutableList()
-        if (history.none { it.id == eewData.id }) {
-            history.add(0, eewData)
-            if (history.size > 50) history.removeLast()
 
-            val json = Gson().toJson(history)
-            getPrefs(context).edit().putString("eew_history", json).apply()
+        // 查找历史记录中是否已经存过这个 ID 的地震
+        val existingIndex = history.indexOfFirst { it.id == eewData.id }
+
+        if (existingIndex != -1) {
+            // 如果找到了，且新报数更大，则覆盖更新
+            if (eewData.reportNum > history[existingIndex].reportNum) {
+                history[existingIndex] = eewData
+            } else {
+                // 如果是旧报文或重复报文，直接跳过，不执行保存
+                return
+            }
+        } else {
+            // 如果没找到，说明是一个全新的地震，插到列表最前面
+            history.add(0, eewData)
+            // 依然保持最多存 50 条记录
+            if (history.size > 50) history.removeLast()
         }
+
+        // 将更新后的列表保存回本地存储
+        val json = gson.toJson(history) // 复用单例
+        getPrefs(context).edit().putString("eew_history", json).apply()
     }
 
     fun getHistory(context: Context): List<EewData> {
         val json = getPrefs(context).getString("eew_history", null)
         return if (json != null) {
             val type = object : TypeToken<List<EewData>>() {}.type
-            Gson().fromJson(json, type)
+            gson.fromJson(json, type) // 复用单例
         } else {
             emptyList()
         }
