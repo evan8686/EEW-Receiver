@@ -51,15 +51,31 @@ class EewForegroundService : Service() {
     }
 
     private fun handleMessage(message: String) {
+        // 🚨 终极防守：兼容大写 C 和小写 c，只要包含其中一个就放行！
+        // 这样既能挡住绝对没有这两个词的心跳包，又能完美兼容中国大陆/台湾地区/日本的所有预警。
+        if (!message.contains("\"HypoCenter\"") && !message.contains("\"Hypocenter\"")) {
+            return
+        }
+
         try {
+            // 如果能走到这里，说明是一条真实的、包含有效字段的地震预警数据
             val eewData = gson.fromJson(message, EewData::class.java)
+
+            // 兜底校验：只看 ID！不管震源地有没有内容，只要有 ID 就算有效预警（防止抛弃保命的第1报）
+            if (eewData?.id.isNullOrEmpty()) {
+                Log.w("EEW_Receiver", "数据缺乏唯一 ID，无法处理，已抛弃。")
+                return
+            }
+
             Log.d("EEW_Receiver", "成功解析地震预警:\n${eewData.toReadableText()}")
 
             val threshold = DataManager.getThreshold(this).toDouble()
             AlertManager(applicationContext).triggerAlert(eewData, threshold)
 
         } catch (e: Exception) {
-            Log.e("EEW_Receiver", "JSON解析失败: ${e.message}")
+            // 🚨 核心排错：如果下次真地震来了没响，连接电脑看这行日志
+            // 它会明确把你拦截到的导致崩溃的原始报文打印出来，方便光速修 Bug
+            Log.e("EEW_Receiver", "⚠️ JSON解析致命失败: ${e.message}\n错误报文: $message")
         }
     }
 
