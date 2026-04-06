@@ -3,7 +3,10 @@ package com.evan8686.eewreceiver
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -12,12 +15,41 @@ import com.google.gson.Gson
 
 class EewForegroundService : Service() {
 
-    // 【核心修改1】：将单一连接改为列表，用于管理多条通道
     private val webSocketManagers = mutableListOf<WebSocketManager>()
     private val gson = Gson()
 
+    // 🚨 核心修改 1：将 AlertManager 提升为成员变量（单例化）
+    private lateinit var alertManager: AlertManager
+
+    // 🚨 核心修改 2：定义广播动作常量（刹车信号）
+    companion object {
+        const val ACTION_STOP_ALERT = "com.evan8686.eewreceiver.ACTION_STOP_ALERT"
+    }
+
+    // 🚨 核心修改 3：创建广播接收器，专门负责“踩刹车”
+    private val stopAlertReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_STOP_ALERT) {
+                Log.d("EEW_Receiver", "接收到停止指令，正在释放警报资源...")
+                alertManager.release()
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
+
+        // 初始化单例警报管理器
+        alertManager = AlertManager(applicationContext)
+
+        // 🚨 核心修改 4：注册广播接收器
+        val filter = IntentFilter(ACTION_STOP_ALERT)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(stopAlertReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(stopAlertReceiver, filter)
+        }
+
         createNotificationChannel()
 
         val notification = NotificationCompat.Builder(this, "EEW_CHANNEL_ID")
@@ -29,14 +61,12 @@ class EewForegroundService : Service() {
 
         startForeground(1, notification)
 
-        // 【核心修改2】：读取本地保存的所有源，并过滤出被用户勾选的源
         val activeSources = DataManager.getSources(this).filter { it.isSelected }
 
         if (activeSources.isEmpty()) {
             Log.w("EEW_Receiver", "没有勾选任何数据源！")
         }
 
-        // 【核心修改3】：遍历所有被勾选的源，分别为它们建立独立的 WebSocket 连接
         activeSources.forEach { source ->
             val ws = WebSocketManager(
                 sourceName = source.name,
@@ -45,23 +75,19 @@ class EewForegroundService : Service() {
                 handleMessage(message)
             }
             ws.connect()
-            webSocketManagers.add(ws) // 加进列表统一管理
+            webSocketManagers.add(ws)
             Log.d("EEW_Receiver", "已连接订阅源: ${source.name}")
         }
     }
 
     private fun handleMessage(message: String) {
-        // 🚨 终极防守：兼容大写 C 和小写 c，只要包含其中一个就放行！
-        // 这样既能挡住绝对没有这两个词的心跳包，又能完美兼容中国大陆/台湾地区/日本的所有预警。
         if (!message.contains("\"HypoCenter\"") && !message.contains("\"Hypocenter\"")) {
             return
         }
 
         try {
-            // 如果能走到这里，说明是一条真实的、包含有效字段的地震预警数据
             val eewData = gson.fromJson(message, EewData::class.java)
 
-            // 兜底校验：只看 ID！不管震源地有没有内容，只要有 ID 就算有效预警（防止抛弃保命的第1报）
             if (eewData?.id.isNullOrEmpty()) {
                 Log.w("EEW_Receiver", "数据缺乏唯一 ID，无法处理，已抛弃。")
                 return
@@ -70,11 +96,12 @@ class EewForegroundService : Service() {
             Log.d("EEW_Receiver", "成功解析地震预警:\n${eewData.toReadableText()}")
 
             val threshold = DataManager.getThreshold(this).toDouble()
-            AlertManager(applicationContext).triggerAlert(eewData, threshold)
+
+            // 🚨 核心修改 5：复用唯一的 alertManager 实例
+            // 内部已实现“新报文自动掐断旧报文”逻辑
+            alertManager.triggerAlert(eewData, threshold)
 
         } catch (e: Exception) {
-            // 🚨 核心排错：如果下次真地震来了没响，连接电脑看这行日志
-            // 它会明确把你拦截到的导致崩溃的原始报文打印出来，方便光速修 Bug
             Log.e("EEW_Receiver", "⚠️ JSON解析致命失败: ${e.message}\n错误报文: $message")
         }
     }
@@ -85,7 +112,16 @@ class EewForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // 【核心修改4】：服务销毁或重启时，一并切断列表里所有的 WebSocket 连接
+
+        // 🚨 核心修改 6：服务销毁时，执行彻底清理
+        try {
+            unregisterReceiver(stopAlertReceiver)
+        } catch (e: Exception) {
+            Log.e("EEW_Receiver", "注销广播接收器失败: ${e.message}")
+        }
+
+        alertManager.release()
+
         webSocketManagers.forEach { it.disconnect() }
         webSocketManagers.clear()
     }
