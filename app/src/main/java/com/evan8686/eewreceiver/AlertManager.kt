@@ -9,8 +9,6 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -20,11 +18,13 @@ import androidx.core.app.NotificationCompat
 
 class AlertManager(private val context: Context) {
 
+    // 🚨 核心修复：将关键硬件控制器提升为全局成员变量，确保随时可以被拦截和释放
     private var mediaPlayer: MediaPlayer? = null
-    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var vibrator: Vibrator? = null
 
+    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val EVENT_CHANNEL_ID = "EEW_EVENT_CHANNEL"
-    private val NOTIFICATION_ID_EVENT = 1002
 
     init {
         createEventNotificationChannel()
@@ -44,7 +44,7 @@ class AlertManager(private val context: Context) {
     }
 
     fun triggerAlert(eewData: EewData, threshold: Double = 3.0) {
-        // 🚨 核心防线：只拦截连 ID 都没有的绝对非法数据
+        // 核心防线：只拦截连 ID 都没有的绝对非法数据
         if (eewData.id.isNullOrEmpty()) {
             Log.d("EEW_Receiver", "拦截到无 ID 的无效数据，不执行通知逻辑。")
             return
@@ -52,7 +52,7 @@ class AlertManager(private val context: Context) {
 
         DataManager.saveHistory(context, eewData)
 
-        // 💡 全局容错包装：为可能为空的字段提供安全的“未知”替代文本，防止 UI 渲染 null
+        // 全局容错包装：为可能为空的字段提供安全的“未知”替代文本，防止 UI 渲染 null
         val safeHypoCenter = if (eewData.hypoCenter.isNullOrEmpty() || eewData.hypoCenter == "null") "未知区域" else eewData.hypoCenter
         val safeIntensity = if (eewData.maxIntensity.isNullOrEmpty() || eewData.maxIntensity == "null") "未知" else eewData.maxIntensity
 
@@ -81,7 +81,6 @@ class AlertManager(private val context: Context) {
         val notification = NotificationCompat.Builder(context, EVENT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(title)
-            // 使用安全包装后的烈度变量
             .setContentText("震级:${eewData.magnitude} / 烈度:$safeIntensity")
             .setStyle(NotificationCompat.BigTextStyle().bigText(eewData.toReadableText()))
             .setPriority(NotificationCompat.PRIORITY_MAX)
@@ -89,11 +88,15 @@ class AlertManager(private val context: Context) {
             .setContentIntent(pendingIntent)
             .build()
 
-        notificationManager.notify(NOTIFICATION_ID_EVENT, notification)
+        // 🚨 核心修复：使用地震 ID 的哈希值作为通知 ID。
+        // 这样同一场地震的更新报文会完美覆盖前一报，而不同地点的独立地震会并列显示，绝不漏报！
+        val notificationId = eewData.id?.hashCode() ?: System.currentTimeMillis().toInt()
+        notificationManager.notify(notificationId, notification)
     }
 
     private fun playSound() {
         try {
+            // 🚨 核心修复：由于 AlertManager 变为单例，这里的 stop 终于可以成功掐断上一首警报了
             mediaPlayer?.stop()
             mediaPlayer?.release()
 
@@ -109,7 +112,7 @@ class AlertManager(private val context: Context) {
                 AudioManager.AUDIO_SESSION_ID_GENERATE
             )
 
-            // 🚨 V1.1.5: 循环播放两遍逻辑
+            // 循环播放两遍逻辑
             var playCount = 0
             mediaPlayer?.setOnCompletionListener { mp ->
                 playCount++
@@ -127,17 +130,22 @@ class AlertManager(private val context: Context) {
     }
 
     private fun wakeUpScreen() {
+        // 🚨 核心修复：先释放旧的屏幕锁，防止 60 秒内多次预警导致锁死不息屏
+        wakeLock?.let { if (it.isHeld) it.release() }
+
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-        val wakeLock = powerManager.newWakeLock(
+        wakeLock = powerManager.newWakeLock(
             PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
             "EEWReceiver::AlertWakeLock"
         )
-        // 唤醒锁维持 60 秒 (与 UI 自动关闭时间对应)
-        wakeLock.acquire(60000L)
+        wakeLock?.acquire(60000L)
     }
 
     private fun vibratePhone() {
-        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        // 🚨 核心修复：先取消旧震动，避免多重叠加
+        vibrator?.cancel()
+
+        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
             vibratorManager.defaultVibrator
         } else {
@@ -145,35 +153,53 @@ class AlertManager(private val context: Context) {
             context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         }
 
-        // 🚨 V1.1.5: 脉冲式震动逻辑 (震动 500ms, 停顿 500ms)
-        val pattern = longArrayOf(0, 500, 500)
+        // 🚨 核心修复：彻底抛弃不稳定且容易被杀的 Handler。
+        // 将震动数组直接写长（5次脉冲 = 4.5秒），并将 repeat 设为 -1（不循环）。
+        // 这样交由底层硬件执行一遍自动停止，绝对不会无限震动。
+        val pattern = longArrayOf(0, 500, 500, 500, 500, 500, 500, 500, 500, 500)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0))
+            vibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1))
         } else {
             @Suppress("DEPRECATION")
-            vibrator.vibrate(pattern, 0)
+            vibrator?.vibrate(pattern, -1)
         }
-
-        // 🚨 V1.1.5: 5秒后强制取消震动
-        Handler(Looper.getMainLooper()).postDelayed({
-            vibrator.cancel()
-        }, 5000)
     }
 
-    // 🚨 深度容错包装：所有传递给 LockScreenAlertActivity 的数据都经过非空校验
     private fun showLockScreenUI(eewData: EewData, safeHypoCenter: String, safeIntensity: String) {
         val safeDepth = if (eewData.depth != null) "${eewData.depth}km" else "未知"
         val safeTime = if (eewData.originTime.isNullOrEmpty() || eewData.originTime == "null") "未知" else eewData.originTime
 
         val intent = android.content.Intent(context, LockScreenAlertActivity::class.java).apply {
-            putExtra("EEW_MAGNITUDE", eewData.magnitude.toString()) // Double类型自带0.0默认值
+            putExtra("EEW_MAGNITUDE", eewData.magnitude.toString())
             putExtra("EEW_INTENSITY", safeIntensity)
             putExtra("EEW_HYPOCENTER", safeHypoCenter)
             putExtra("EEW_DEPTH", safeDepth)
             putExtra("EEW_TIME", safeTime)
-            putExtra("EEW_REPORT_NUM", eewData.reportNum.toString()) // 确保 1.2.0 版本新增的报文数不丢失
+            putExtra("EEW_REPORT_NUM", eewData.reportNum.toString())
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
         context.startActivity(intent)
+    }
+
+    // 🚨 终极防线：提供给 Service 调用的全局销毁方法
+    // 确保服务被关闭或重置时，所有的警报、震动和屏幕锁全部被强行解除。
+    fun release() {
+        try {
+            mediaPlayer?.let {
+                if (it.isPlaying) it.stop()
+                it.release()
+            }
+        } catch (e: Exception) {
+            Log.e("EEW_Receiver", "释放音频资源失败: ${e.message}")
+        } finally {
+            mediaPlayer = null
+        }
+
+        vibrator?.cancel()
+        vibrator = null
+
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
     }
 }
