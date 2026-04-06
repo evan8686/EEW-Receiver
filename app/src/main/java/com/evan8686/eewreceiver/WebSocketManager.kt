@@ -12,8 +12,19 @@ class WebSocketManager(
     private val onMessageReceived: (String) -> Unit
 ) {
     private var webSocket: WebSocket? = null
-    private var isClosedByUser = false
+
+    // 🚨 核心修复 1：添加 @Volatile 保证多线程可见性
+    // 强制所有线程（包括主线程和 OkHttp 后台线程）直接从主内存读写该变量，拒绝 CPU 缓存导致的信息差
+    @Volatile private var isClosedByUser = false
+
     private var reconnectAttemptCount = 0 // 记录重连次数
+
+    // 🚨 核心修复 2：将 Handler 和重连任务 (Runnable) 声明为成员变量
+    // 这样我们手里就有了“遥控器”，随时可以取消它
+    private val reconnectHandler = Handler(Looper.getMainLooper())
+    private val reconnectRunnable = Runnable {
+        if (!isClosedByUser) connect()
+    }
 
     // 配置心跳包：每 30 秒自动发送 ping，这是最省电的保活方式
     private val client = OkHttpClient.Builder()
@@ -51,20 +62,25 @@ class WebSocketManager(
     }
 
     private fun scheduleReconnect() {
+        // 在发起新的倒计时前，先清除可能遗留的旧任务，防止多个重连任务叠加排队
+        reconnectHandler.removeCallbacks(reconnectRunnable)
+
         // 💡 核心优化：指数退避重连算法 (5s, 10s, 20s, 40s, 最大 60s)
         val delayMillis = (5000L * Math.pow(2.0, reconnectAttemptCount.toDouble())).toLong().coerceAtMost(60000L)
 
         Log.d("EEW_Receiver", "[$sourceName] $delayMillis 毫秒后尝试重新连接...")
         reconnectAttemptCount++
 
-        // 使用主线程 Handler 延迟执行，绝对不会卡死 OkHttp 的网络线程池
-        Handler(Looper.getMainLooper()).postDelayed({
-            if (!isClosedByUser) connect()
-        }, delayMillis)
+        // 发射倒计时任务，把任务信件塞进系统邮筒
+        reconnectHandler.postDelayed(reconnectRunnable, delayMillis)
     }
 
     fun disconnect() {
         isClosedByUser = true
+
+        // 🚨 核心修复 3：主动关闭时，撕毁邮筒里尚未执行的“幽灵倒计时信件”
+        reconnectHandler.removeCallbacks(reconnectRunnable)
+
         webSocket?.close(1000, "用户主动停止监控")
         webSocket = null
         client.dispatcher.executorService.shutdown()
