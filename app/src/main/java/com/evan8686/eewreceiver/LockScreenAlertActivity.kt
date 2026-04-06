@@ -21,20 +21,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
+// 💡 规范化：将所有零散的字段打包成一个标准的数据类（高内聚）
+data class AlertUiData(
+    val magnitude: String = "0.0",
+    val intensity: String = "未知",
+    val hypoCenter: String = "未知",
+    val depth: String = "未知",
+    val time: String = "未知",
+    val reportNum: String = "1",
+    val triggerTime: Long = 0L // 用于触发 60 秒超时自动关闭
+)
+
 class LockScreenAlertActivity : ComponentActivity() {
 
-    // 💡 独立管理每个字段的状态
-    private var magnitudeState = mutableStateOf("0.0")
-    private var intensityState = mutableStateOf("未知")
-    private var hypoCenterState = mutableStateOf("未知")
-    private var depthState = mutableStateOf("未知")
-    private var timeState = mutableStateOf("未知")
-    private var reportNumState = mutableStateOf("1")
-    private var updateTriggerState = mutableStateOf(0L)
+    // 💡 规范化：使用单一的 mutableStateOf 来持有整个数据流
+    private var uiState = mutableStateOf(AlertUiData())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 保持锁屏亮屏的系统设置
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -47,120 +53,22 @@ class LockScreenAlertActivity : ComponentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // 初始化第一报数据
+        // 初始化第一报数据 (Activity 重建时也会重新解析 Intent)
         updateDataFromIntent(intent)
 
         setContent {
-            LaunchedEffect(key1 = updateTriggerState.value) {
-                delay(60_000L)
+            // 💡 规范化：在 Compose 作用域内观察 uiState 的变化。
+            // 结合 onCreate 里的 updateDataFromIntent，完美应对横竖屏旋转等重建场景！
+            val alertData by remember { uiState }
+
+            LaunchedEffect(key1 = alertData.triggerTime) {
+                delay(60_000L) // 60秒无人操作，自动关闭弹窗并刹车
                 clearScreenFlagsAndFinish()
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFFC63A2F))
-                    .padding(24.dp)
-            ) {
-                // 中间核心视觉区
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        text = "⚠️ 地震警报 ⚠️",
-                        fontSize = 36.sp,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(32.dp))
-
-                    // ================= 半透明数据卡片 =================
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = Color.Black.copy(alpha = 0.2f),
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                            .padding(24.dp)
-                    ) {
-                        // 顶部小标题行
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("震源震级", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
-                            Text("最大烈度", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
-                        }
-
-                        // 超大数字行
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Bottom
-                        ) {
-                            Row(verticalAlignment = Alignment.Bottom) {
-                                Text(
-                                    text = magnitudeState.value,
-                                    color = Color.White,
-                                    fontSize = 56.sp,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                                Text(
-                                    text = "级",
-                                    color = Color.White,
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
-                                )
-                            }
-                            Text(
-                                text = intensityState.value,
-                                color = Color.White,
-                                fontSize = 56.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        // 半透明分割线
-                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.2f)))
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // 🚨 核心排版重构：使用自定义的完美对齐组件
-                        // 你不再需要手动敲空格了，算法会自动让“深度”和“预警编号”变得一样宽！
-                        AlignedInfoRow(label = "预警编号", value = "第 ${reportNumState.value} 报")
-                        AlignedInfoRow(label = "震源地", value = hypoCenterState.value)
-                        AlignedInfoRow(label = "深度", value = depthState.value)
-                        AlignedInfoRow(label = "时间", value = timeState.value)
-                    }
-                    // ================= 卡片区域结束 =================
-
-                    Spacer(modifier = Modifier.height(48.dp))
-
-                    // 扁平化圆角按钮
-                    Button(
-                        onClick = { clearScreenFlagsAndFinish() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                        shape = RoundedCornerShape(50),
-                        modifier = Modifier.fillMaxWidth(0.6f).height(50.dp)
-                    ) {
-                        Text(text = "我知道了", color = Color(0xFFC63A2F), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                // 底部安静的品牌水印区
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text("EEW Receiver", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
-                    Text("地震预警接收器", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                }
+            // 抽取为独立的 Composable 函数，让 UI 代码逻辑更清爽
+            AlertScreenUI(alertData = alertData) {
+                clearScreenFlagsAndFinish()
             }
         }
     }
@@ -168,21 +76,31 @@ class LockScreenAlertActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // 当后续报文（如第 2 报、第 3 报）连续发来时，刷新数据
         intent?.let { updateDataFromIntent(it) }
     }
 
     private fun updateDataFromIntent(intent: Intent) {
-        magnitudeState.value = intent.getStringExtra("EEW_MAGNITUDE") ?: "0.0"
-        intensityState.value = intent.getStringExtra("EEW_INTENSITY") ?: "未知"
-        hypoCenterState.value = intent.getStringExtra("EEW_HYPOCENTER") ?: "未知"
-        depthState.value = intent.getStringExtra("EEW_DEPTH") ?: "未知"
-        timeState.value = intent.getStringExtra("EEW_TIME") ?: "未知"
-        reportNumState.value = intent.getStringExtra("EEW_REPORT_NUM") ?: "1"
-
-        updateTriggerState.value = System.currentTimeMillis()
+        uiState.value = AlertUiData(
+            magnitude = intent.getStringExtra("EEW_MAGNITUDE") ?: "0.0",
+            intensity = intent.getStringExtra("EEW_INTENSITY") ?: "未知",
+            hypoCenter = intent.getStringExtra("EEW_HYPOCENTER") ?: "未知",
+            depth = intent.getStringExtra("EEW_DEPTH") ?: "未知",
+            time = intent.getStringExtra("EEW_TIME") ?: "未知",
+            reportNum = intent.getStringExtra("EEW_REPORT_NUM") ?: "1",
+            triggerTime = System.currentTimeMillis()
+        )
     }
 
     private fun clearScreenFlagsAndFinish() {
+        // 🚨 核心刹车线：向后台服务发送“停止警报”的广播
+        val stopIntent = Intent(EewForegroundService.ACTION_STOP_ALERT).apply {
+            // 限制广播只在自己的 App 内传递，防止其他应用伪造广播干扰
+            setPackage(packageName)
+        }
+        sendBroadcast(stopIntent)
+
+        // 解除锁屏长亮的标志位，让屏幕可以自然休眠
         window.clearFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                     WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
@@ -192,7 +110,116 @@ class LockScreenAlertActivity : ComponentActivity() {
     }
 }
 
-// 💡 新增：用于解决“强迫症不对齐”的专属 Compose 组件
+// 💡 纯粹的 UI 渲染组件，只负责根据传入的 AlertUiData 进行绘图
+@Composable
+fun AlertScreenUI(alertData: AlertUiData, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFC63A2F))
+            .padding(24.dp)
+    ) {
+        // 中间核心视觉区
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "⚠️ 地震警报 ⚠️",
+                fontSize = 36.sp,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // ================= 半透明数据卡片 =================
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = Color.Black.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .padding(24.dp)
+            ) {
+                // 顶部小标题行
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("震源震级", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
+                    Text("最大烈度", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
+                }
+
+                // 超大数字行
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            text = alertData.magnitude,
+                            color = Color.White,
+                            fontSize = 56.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = "级",
+                            color = Color.White,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
+                        )
+                    }
+                    Text(
+                        text = alertData.intensity,
+                        color = Color.White,
+                        fontSize = 56.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                // 半透明分割线
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.2f)))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                AlignedInfoRow(label = "预警编号", value = "第 ${alertData.reportNum} 报")
+                AlignedInfoRow(label = "震源地", value = alertData.hypoCenter)
+                AlignedInfoRow(label = "深度", value = alertData.depth)
+                AlignedInfoRow(label = "时间", value = alertData.time)
+            }
+            // ================= 卡片区域结束 =================
+
+            Spacer(modifier = Modifier.height(48.dp))
+
+            // 扁平化圆角按钮
+            Button(
+                onClick = onDismiss, // 触发广播和销毁逻辑
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                shape = RoundedCornerShape(50),
+                modifier = Modifier.fillMaxWidth(0.6f).height(50.dp)
+            ) {
+                Text(text = "我知道了", color = Color(0xFFC63A2F), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // 底部安静的品牌水印区
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("EEW Receiver", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
+            Text("地震预警接收器", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+        }
+    }
+}
+
+// 💡 解决“强迫症不对齐”的专属 Compose 组件
 @Composable
 fun AlignedInfoRow(label: String, value: String) {
     Row(
@@ -202,7 +229,7 @@ fun AlignedInfoRow(label: String, value: String) {
         // 左侧容器：固定宽度，内部字符两端对齐
         Row(
             modifier = Modifier.width(72.dp), // 72dp 刚好完美放下4个 16sp 的汉字
-            horizontalArrangement = Arrangement.SpaceBetween // 核心魔法：字符自动均匀散开
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
             label.forEach { char ->
                 Text(text = char.toString(), color = Color.White, fontSize = 16.sp)
