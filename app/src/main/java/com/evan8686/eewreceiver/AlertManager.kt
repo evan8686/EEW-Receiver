@@ -44,28 +44,32 @@ class AlertManager(private val context: Context) {
     }
 
     fun triggerAlert(eewData: EewData, threshold: Double = 3.0) {
-        if (eewData.id.isNullOrEmpty() || eewData.hypoCenter == null || eewData.hypoCenter == "null") {
-            Log.d("EEW_Receiver", "拦截到无效或空数据，不执行通知逻辑。")
+        // 🚨 核心防线：只拦截连 ID 都没有的绝对非法数据
+        if (eewData.id.isNullOrEmpty()) {
+            Log.d("EEW_Receiver", "拦截到无 ID 的无效数据，不执行通知逻辑。")
             return
         }
 
         DataManager.saveHistory(context, eewData)
 
+        // 💡 全局容错包装：为可能为空的字段提供安全的“未知”替代文本，防止 UI 渲染 null
+        val safeHypoCenter = if (eewData.hypoCenter.isNullOrEmpty() || eewData.hypoCenter == "null") "未知区域" else eewData.hypoCenter
+        val safeIntensity = if (eewData.maxIntensity.isNullOrEmpty() || eewData.maxIntensity == "null") "未知" else eewData.maxIntensity
+
         if (eewData.magnitude >= threshold) {
             Log.d("EEW_Receiver", "震级 ${eewData.magnitude} >= $threshold，触发强警报！")
-            sendEventNotification(eewData, "【强震预警】${eewData.hypoCenter}")
+            sendEventNotification(eewData, "【强震预警】$safeHypoCenter", safeIntensity)
             wakeUpScreen()
             vibratePhone()
             playSound()
-            // 🚨 核心修改：直接将完整的 eewData 对象传给弹窗，方便 UI 层拆分显示
-            showLockScreenUI(eewData)
+            showLockScreenUI(eewData, safeHypoCenter, safeIntensity)
         } else {
             Log.d("EEW_Receiver", "震级 ${eewData.magnitude} < $threshold，仅发送详细通知。")
-            sendEventNotification(eewData, "【地震速报】${eewData.hypoCenter}")
+            sendEventNotification(eewData, "【地震速报】$safeHypoCenter", safeIntensity)
         }
     }
 
-    private fun sendEventNotification(eewData: EewData, title: String) {
+    private fun sendEventNotification(eewData: EewData, title: String, safeIntensity: String) {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
@@ -77,7 +81,8 @@ class AlertManager(private val context: Context) {
         val notification = NotificationCompat.Builder(context, EVENT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(title)
-            .setContentText("震级:${eewData.magnitude} / 烈度:${eewData.maxIntensity}")
+            // 使用安全包装后的烈度变量
+            .setContentText("震级:${eewData.magnitude} / 烈度:$safeIntensity")
             .setStyle(NotificationCompat.BigTextStyle().bigText(eewData.toReadableText()))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setAutoCancel(true)
@@ -155,14 +160,18 @@ class AlertManager(private val context: Context) {
         }, 5000)
     }
 
-    // 🚨 核心修改：将 EewData 拆解为多个独立的参数装入 Intent
-    private fun showLockScreenUI(eewData: EewData) {
+    // 🚨 深度容错包装：所有传递给 LockScreenAlertActivity 的数据都经过非空校验
+    private fun showLockScreenUI(eewData: EewData, safeHypoCenter: String, safeIntensity: String) {
+        val safeDepth = if (eewData.depth != null) "${eewData.depth}km" else "未知"
+        val safeTime = if (eewData.originTime.isNullOrEmpty() || eewData.originTime == "null") "未知" else eewData.originTime
+
         val intent = android.content.Intent(context, LockScreenAlertActivity::class.java).apply {
-            putExtra("EEW_MAGNITUDE", eewData.magnitude.toString())
-            putExtra("EEW_INTENSITY", eewData.maxIntensity ?: "未知")
-            putExtra("EEW_HYPOCENTER", eewData.hypoCenter ?: "未知")
-            putExtra("EEW_DEPTH", if (eewData.depth != null) "${eewData.depth}km" else "未知")
-            putExtra("EEW_TIME", eewData.originTime ?: "未知")
+            putExtra("EEW_MAGNITUDE", eewData.magnitude.toString()) // Double类型自带0.0默认值
+            putExtra("EEW_INTENSITY", safeIntensity)
+            putExtra("EEW_HYPOCENTER", safeHypoCenter)
+            putExtra("EEW_DEPTH", safeDepth)
+            putExtra("EEW_TIME", safeTime)
+            putExtra("EEW_REPORT_NUM", eewData.reportNum.toString()) // 确保 1.2.0 版本新增的报文数不丢失
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
         context.startActivity(intent)
