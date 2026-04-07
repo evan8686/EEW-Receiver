@@ -3,10 +3,8 @@ package com.evan8686.eewreceiver
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -18,37 +16,22 @@ class EewForegroundService : Service() {
     private val webSocketManagers = mutableListOf<WebSocketManager>()
     private val gson = Gson()
 
-    // 🚨 核心修改 1：将 AlertManager 提升为成员变量（单例化）
+    // 🚨 核心修改 1：将 AlertManager 提升为全局唯一的成员变量（单例化）
     private lateinit var alertManager: AlertManager
 
-    // 🚨 核心修改 2：定义广播动作常量（刹车信号）
+    // 🚨 核心修改 2：定义服务接收的指令常量
     companion object {
         const val ACTION_STOP_ALERT = "com.evan8686.eewreceiver.ACTION_STOP_ALERT"
-    }
-
-    // 🚨 核心修改 3：创建广播接收器，专门负责“踩刹车”
-    private val stopAlertReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == ACTION_STOP_ALERT) {
-                Log.d("EEW_Receiver", "接收到停止指令，正在释放警报资源...")
-                alertManager.release()
-            }
-        }
+        const val ACTION_TEST_ALERT = "ACTION_TEST_ALERT" // 与 MainActivity 的测试发信保持一致
     }
 
     override fun onCreate() {
         super.onCreate()
 
-        // 初始化单例警报管理器
+        // 初始化唯一的警报管理器实例
         alertManager = AlertManager(applicationContext)
 
-        // 🚨 核心修改 4：注册广播接收器
-        val filter = IntentFilter(ACTION_STOP_ALERT)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(stopAlertReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(stopAlertReceiver, filter)
-        }
+        // 💡 (已删除容易失效的 BroadcastReceiver 注册代码)
 
         createNotificationChannel()
 
@@ -97,8 +80,7 @@ class EewForegroundService : Service() {
 
             val threshold = DataManager.getThreshold(this).toDouble()
 
-            // 🚨 核心修改 5：复用唯一的 alertManager 实例
-            // 内部已实现“新报文自动掐断旧报文”逻辑
+            // 🚨 复用唯一的 alertManager 实例，内部已实现“新报文自动掐断旧报文”逻辑
             alertManager.triggerAlert(eewData, threshold)
 
         } catch (e: Exception) {
@@ -106,20 +88,37 @@ class EewForegroundService : Service() {
         }
     }
 
+    // 🚨 核心修改 3：统一指挥部！拦截所有的显式控制命令
+    // (已听取你的分析，删除了多余的本地 I/O 假动作，全权交由 WebSocket 30s 心跳包保活)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_STOP_ALERT -> {
+                // 来自 LockScreenAlertActivity 的“刹车”命令
+                Log.d("EEW_Receiver", "直接收到停止指令，正在释放全局警报资源...")
+                alertManager.release()
+            }
+            ACTION_TEST_ALERT -> {
+                // 来自 MainActivity 的“测试警报”命令
+                val dummyJson = intent.getStringExtra("DUMMY_DATA")
+                if (dummyJson != null) {
+                    try {
+                        val dummyData = gson.fromJson(dummyJson, EewData::class.java)
+                        val threshold = DataManager.getThreshold(this).toDouble()
+                        Log.d("EEW_Receiver", "收到测试指令，触发全局警报管理器...")
+                        alertManager.triggerAlert(dummyData, threshold)
+                    } catch (e: Exception) {
+                        Log.e("EEW_Receiver", "测试数据解析失败: ${e.message}")
+                    }
+                }
+            }
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
 
-        // 🚨 核心修改 6：服务销毁时，执行彻底清理
-        try {
-            unregisterReceiver(stopAlertReceiver)
-        } catch (e: Exception) {
-            Log.e("EEW_Receiver", "注销广播接收器失败: ${e.message}")
-        }
-
+        // 🚨 服务销毁时直接释放资源，无需再注销广播
         alertManager.release()
 
         webSocketManagers.forEach { it.disconnect() }
