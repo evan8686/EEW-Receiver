@@ -277,9 +277,16 @@ fun SettingsScreen() {
                             latitude = 0.0, longitude = 0.0, magnitude = 7.0,
                             depth = 10, maxIntensity = "6弱"
                         )
+
                         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            AlertManager(context).triggerAlert(dummyData, threshold.toDouble())
+                            // 🚨 核心修复：不再直接新建 AlertManager，而是把测试数据发给 Service
+                            val intent = Intent(context, EewForegroundService::class.java).apply {
+                                action = "ACTION_TEST_ALERT"
+                                putExtra("DUMMY_DATA", com.google.gson.Gson().toJson(dummyData))
+                            }
+                            context.startService(intent)
                         }, 3000)
+
                     },
                     modifier = Modifier.padding(top = 8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
@@ -293,7 +300,7 @@ fun SettingsScreen() {
 
         Column(modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(
-                text = "您安装的当前版本为1.2.0版本，您可随时访问Github仓库获取版本更新情况。该项目为个人测试项目，本人无软件开发经验。此 APP 由 Gemini 协助开发完成。仅供个人测试。",
+                text = "您安装的当前版本为1.2.8版本，您可随时访问Github仓库获取版本更新情况。该项目为个人测试项目，本人无软件开发经验。此 APP 由 Gemini 协助开发完成。仅供个人测试。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline
             )
