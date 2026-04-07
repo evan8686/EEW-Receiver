@@ -35,7 +35,7 @@ data class AlertUiData(
 class LockScreenAlertActivity : ComponentActivity() {
 
     // 💡 规范化：使用单一的 mutableStateOf 来持有整个数据流
-    private var uiState = mutableStateOf(AlertUiData())
+    private val uiState = mutableStateOf(AlertUiData())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -93,12 +93,11 @@ class LockScreenAlertActivity : ComponentActivity() {
     }
 
     private fun clearScreenFlagsAndFinish() {
-        // 🚨 核心刹车线：向后台服务发送“停止警报”的广播
-        val stopIntent = Intent(EewForegroundService.ACTION_STOP_ALERT).apply {
-            // 限制广播只在自己的 App 内传递，防止其他应用伪造广播干扰
-            setPackage(packageName)
+        // 🚨 核心刹车线修改：抛弃广播，改为向后台服务发送“显式停止警报”的启动指令
+        val stopIntent = Intent(this, EewForegroundService::class.java).apply {
+            action = EewForegroundService.ACTION_STOP_ALERT
         }
-        sendBroadcast(stopIntent)
+        startService(stopIntent)
 
         // 解除锁屏长亮的标志位，让屏幕可以自然休眠
         window.clearFlags(
@@ -197,7 +196,7 @@ fun AlertScreenUI(alertData: AlertUiData, onDismiss: () -> Unit) {
 
             // 扁平化圆角按钮
             Button(
-                onClick = onDismiss, // 触发广播和销毁逻辑
+                onClick = onDismiss, // 触发 service 指令和销毁逻辑
                 colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                 shape = RoundedCornerShape(50),
                 modifier = Modifier.fillMaxWidth(0.6f).height(50.dp)
