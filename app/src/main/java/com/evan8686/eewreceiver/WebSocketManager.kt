@@ -17,25 +17,30 @@ class WebSocketManager(
     // 强制所有线程（包括主线程和 OkHttp 后台线程）直接从主内存读写该变量，拒绝 CPU 缓存导致的信息差
     @Volatile private var isClosedByUser = false
 
-    private var reconnectAttemptCount = 0 // 记录重连次数
+    @Volatile private var reconnectAttemptCount = 0 // 记录重连次数
 
     // 🚨 核心修复 2：将 Handler 和重连任务 (Runnable) 声明为成员变量
-    // 这样我们手里就有了“遥控器”，随时可以取消它
+    // 这样我们手里就有了"遥控器"，随时可以取消它
     private val reconnectHandler = Handler(Looper.getMainLooper())
     private val reconnectRunnable = Runnable {
         if (!isClosedByUser) connect()
     }
 
+    // 🚨 终极架构修复：使用 companion object 将 OkHttpClient 提升为全局单例
     // 配置心跳包：每 30 秒自动发送 ping，这是最省电的保活方式
-    private val client = OkHttpClient.Builder()
-        .pingInterval(30, TimeUnit.SECONDS)
-        .build()
+    // 无论勾选几个源，全 App 共享这一个 Client，复用底层线程池和连接池，彻底杜绝内存/线程泄漏
+    companion object {
+        private val sharedClient = OkHttpClient.Builder()
+            .pingInterval(30, TimeUnit.SECONDS)
+            .build()
+    }
 
     fun connect() {
         isClosedByUser = false
         val request = Request.Builder().url(url).build()
 
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
+        // 使用全局单例 sharedClient 创建 WebSocket 连接
+        webSocket = sharedClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 super.onOpen(webSocket, response)
                 Log.d("EEW_Receiver", "[$sourceName] WebSocket 已连接: $url")
@@ -78,11 +83,15 @@ class WebSocketManager(
     fun disconnect() {
         isClosedByUser = true
 
-        // 🚨 核心修复 3：主动关闭时，撕毁邮筒里尚未执行的“幽灵倒计时信件”
+        // 🚨 核心修复 3：主动关闭时，撕毁邮筒里尚未执行的"幽灵倒计时信件"
         reconnectHandler.removeCallbacks(reconnectRunnable)
 
+        // 只需优雅地关闭当前这条 WebSocket 即可
         webSocket?.close(1000, "用户主动停止监控")
         webSocket = null
-        client.dispatcher.executorService.shutdown()
+
+        // 🚨 核心修复 4 (已修正)：因为现在 sharedClient 是全局单例
+        // 其他数据源可能还在使用它，所以绝不能在这里调用 evictAll() 或 shutdown() 进行“连坐”销毁。
+        // 闲置的底层线程会在 60 秒后由系统自动回收，这是最安全的做法。
     }
 }
