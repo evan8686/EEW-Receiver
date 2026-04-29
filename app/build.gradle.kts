@@ -17,8 +17,8 @@ android {
         applicationId = "com.evan8686.eewreceiver"
         minSdk = 24
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.3.5"
+        versionCode = 15
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -61,4 +61,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // JSON 解析库
     implementation("com.google.code.gson:gson:2.10.1")
+    // 轻量级地图库（OpenStreetMap，无需 API Key）
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
 }

@@ -29,6 +29,48 @@ object DataManager {
     fun getThreshold(context: Context): Float =
         getPrefs(context).getFloat("alert_threshold", 3.0f)
 
+    // ========== 用户坐标相关 ==========
+
+    /** 保存用户纬度，key: user_latitude */
+    fun saveLatitude(context: Context, lat: Double) {
+        getPrefs(context).edit().putFloat("user_latitude", lat.toFloat()).apply()
+    }
+
+    /** 读取用户纬度，默认值 Double.NaN 表示未设置 */
+    fun getLatitude(context: Context): Double {
+        val raw = getPrefs(context).getFloat("user_latitude", Float.NaN)
+        return if (raw.isNaN()) Double.NaN else raw.toDouble()
+    }
+
+    /** 保存用户经度，key: user_longitude */
+    fun saveLongitude(context: Context, lon: Double) {
+        getPrefs(context).edit().putFloat("user_longitude", lon.toFloat()).apply()
+    }
+
+    /** 读取用户经度，默认值 Double.NaN 表示未设置 */
+    fun getLongitude(context: Context): Double {
+        val raw = getPrefs(context).getFloat("user_longitude", Float.NaN)
+        return if (raw.isNaN()) Double.NaN else raw.toDouble()
+    }
+
+    // ========== 本地预估烈度阈值相关 ==========
+
+    /**
+     * 保存本地预估烈度触发阈值
+     * 0 表示不启用（仍使用震级阈值逻辑），1-12 表示本地预估烈度达到该值时触发
+     * key: local_intensity_threshold
+     */
+    fun saveLocalIntensityThreshold(context: Context, value: Int) {
+        getPrefs(context).edit().putInt("local_intensity_threshold", value).apply()
+    }
+
+    /**
+     * 读取本地预估烈度触发阈值
+     * 默认值为 0（不启用）
+     */
+    fun getLocalIntensityThreshold(context: Context): Int =
+        getPrefs(context).getInt("local_intensity_threshold", 0)
+
     // 🚨 提取默认源列表为私有方法，防止重复代码，方便容灾重置时统一调用
     private fun getDefaultSources() = listOf(
         ApiSource("台湾中央气象署 (CWA)", "wss://ws-api.wolfx.jp/cwa_eew", true),

@@ -1,5 +1,6 @@
 package com.evan8686.eewreceiver
 
+import android.animation.ValueAnimator
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -9,12 +10,18 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import java.util.Locale
 
 class AlertManager(private val context: Context) {
 
@@ -22,11 +29,22 @@ class AlertManager(private val context: Context) {
     private var wakeLock: PowerManager.WakeLock? = null
     private var vibrator: Vibrator? = null
 
-    // 🔑 记录"用户已手动静音"的开关
+    // 记录警报音当前的渐变音量
+    private var currentAlarmVolume = 1.0f
+    private var volumeAnimator: ValueAnimator? = null
+
+    // ================================================================
+    // 任务8：TTS 语音播报相关字段
+    // ================================================================
+    private var tts: TextToSpeech? = null
+    private val ttsHandler = Handler(Looper.getMainLooper())
+    private val pendingTtsRunnables = mutableListOf<Runnable>()
+
+    // 记录"用户已手动静音"的开关
     @Volatile
     private var userSilenced = false
 
-    // 🔑 记录每场地震最近已警报过的报号，防止同一报文重复触发
+    // 记录每场地震最近已警报过的报号，防止同一报文重复触发
     private val recentlyAlertedMap = mutableMapOf<String, Int>()
 
     private val notificationManager =
@@ -45,7 +63,7 @@ class AlertManager(private val context: Context) {
                 description = "用于显示具体的地震预警详细信息"
                 enableLights(true)
                 enableVibration(true)
-                // 🚨 必须静音：防止系统默认通知音和我们的长警报音抢占音频焦点
+                // 必须静音：防止系统默认通知音和我们的长警报音抢占音频焦点
                 setSound(null, null)
             }
             notificationManager.createNotificationChannel(channel)
@@ -59,7 +77,7 @@ class AlertManager(private val context: Context) {
             return
         }
 
-        // 🔑 重复报文拦截
+        // 重复报文拦截
         val lastHandledReportNum = recentlyAlertedMap[eewData.id] ?: -1
         if (eewData.reportNum <= lastHandledReportNum) {
             Log.d("EEW_Receiver", "重复或旧报文已忽略: ID=${eewData.id}, 第${eewData.reportNum}报")
@@ -82,27 +100,93 @@ class AlertManager(private val context: Context) {
             if (eewData.maxIntensity.isNullOrEmpty() || eewData.maxIntensity == "null") "未知"
             else eewData.maxIntensity
 
-        // 🚨 核心判断：是否达到强警报阈值
-        if (eewData.magnitude >= threshold) {
-            Log.d("EEW_Receiver", "震级 ${eewData.magnitude} >= $threshold，触发强警报！")
+        // ================================================================
+        // 任务2/3 接入：读取用户坐标和本地烈度阈值，计算距离 / 烈度 / 倒计时
+        // ================================================================
+
+        val userLat = DataManager.getLatitude(context)
+        val userLon = DataManager.getLongitude(context)
+        val localIntensityThreshold = DataManager.getLocalIntensityThreshold(context)
+
+        // 兜底检查：震中坐标是否有效（(0.0, 0.0) 是 EewData 的默认值，表示未收到坐标）
+        val epicenterValid = !(eewData.latitude == 0.0 && eewData.longitude == 0.0)
+
+        // 计算震中距（用户坐标有效 且 震中坐标有效时才计算）
+        val distanceKm: Double? = if (!userLat.isNaN() && !userLon.isNaN() && epicenterValid) {
+            EarthquakeCalculator.calculateDistance(
+                userLat, userLon,
+                eewData.latitude, eewData.longitude
+            )
+        } else null
+
+        // 计算本地预估烈度（有距离才计算）
+        val localIntensity: Int? = if (distanceKm != null) {
+            EarthquakeCalculator.calculateLocalIntensity(
+                eewData.magnitude, distanceKm
+            ).toInt()
+        } else null
+
+        // 计算 P 波到达倒计时（有距离才计算）
+        val originTimeMillis = EarthquakeCalculator.parseOriginTimeMillis(eewData.originTime)
+        val countdown: Int? = if (distanceKm != null && originTimeMillis != null) {
+            EarthquakeCalculator.calculateCountdown(distanceKm, originTimeMillis)
+        } else null
+
+        Log.d(
+            "EEW_Receiver",
+            "计算结果：距离=${distanceKm}km，本地烈度=${localIntensity}，" +
+                    "倒计时=${countdown}s，本地烈度阈值=$localIntensityThreshold，震源震级阈值=$threshold"
+        )
+
+        // ================================================================
+        // 核心判断：根据是否启用了"本地烈度阈值"决定触发条件
+        // ================================================================
+
+        val shouldTrigger: Boolean = if (localIntensityThreshold > 0 && localIntensity != null) {
+            // 模式1：已设置本地烈度阈值且计算有效 → 用本地烈度判断
+            val triggered = localIntensity >= localIntensityThreshold
+            Log.d(
+                "EEW_Receiver",
+                if (triggered) "本地烈度 $localIntensity >= 阈值 $localIntensityThreshold，触发强警报！"
+                else "本地烈度 $localIntensity < 阈值 $localIntensityThreshold，不触发全屏。"
+            )
+            triggered
+        } else {
+            // 模式2：未启用烈度阈值或坐标未设置 → 沿用原有震级阈值逻辑
+            val triggered = eewData.magnitude >= threshold
+            Log.d(
+                "EEW_Receiver",
+                if (triggered) "震级 ${eewData.magnitude} >= 阈值 $threshold，触发强警报！"
+                else "震级 ${eewData.magnitude} < 阈值 $threshold，不触发全屏。"
+            )
+            triggered
+        }
+
+        if (shouldTrigger) {
             userSilenced = false
 
-            // 1. 硬件预热
-            wakeUpScreen()
+            // 1. 硬件预热：亮屏时长 = 倒计时 + 60 秒
+            wakeUpScreen(countdown)
             vibratePhone()
             playSound()
 
-            // 2. 发送紧急通知（删除了全屏意图，退回到最纯粹的通知栏提醒）
+            // 任务8：TTS 倒计时语音播报
+            startTtsAnnouncements(countdown)
+
+            // 2. 发送紧急通知
             sendEventNotification(eewData, "【强震预警】$safeHypoCenter", safeIntensity, isEmergency = true)
 
-            // 3. 🚨 恢复强制拉起界面！
-            // 初次测试时，这行代码会唤醒 OPPO 系统的“后台弹窗”权限询问。
-            // 授权后，无论是亮屏还是锁屏，都能粗暴直接地全屏拍在用户脸上！
-            showLockScreenUI(eewData, safeHypoCenter, safeIntensity)
+            // 3. 强制拉起全屏弹窗，同时传递计算结果
+            showLockScreenUI(
+                eewData, safeHypoCenter, safeIntensity,
+                distanceKm = distanceKm,
+                localIntensity = localIntensity,
+                countdown = countdown,
+                epicenterValid = epicenterValid
+            )
 
         } else {
-            Log.d("EEW_Receiver", "震级 ${eewData.magnitude} < $threshold，仅发送详细通知。")
-            // 未达阈值，仅发送横幅通知，不弹全屏
+            Log.d("EEW_Receiver", "未达触发条件，仅发送详细通知。")
             sendEventNotification(eewData, "【地震速报】$safeHypoCenter", safeIntensity, isEmergency = false)
         }
     }
@@ -129,8 +213,6 @@ class AlertManager(private val context: Context) {
             .setContentIntent(mainPendingIntent)
 
         if (isEmergency) {
-            // 🚨 删除了 .setFullScreenIntent()
-            // 这样系统管家就不会因为“滥用特权”而没收你的询问弹窗了
             builder.setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
         } else {
@@ -141,11 +223,14 @@ class AlertManager(private val context: Context) {
         notificationManager.notify(notificationId, builder.build())
     }
 
-    // 🚨 找回来的 showLockScreenUI 方法
     private fun showLockScreenUI(
         eewData: EewData,
         safeHypoCenter: String,
-        safeIntensity: String
+        safeIntensity: String,
+        distanceKm: Double? = null,
+        localIntensity: Int? = null,
+        countdown: Int? = null,
+        epicenterValid: Boolean = false
     ) {
         val safeDepth = if (eewData.depth != null) "${eewData.depth}km" else "未知"
         val safeTime =
@@ -159,7 +244,13 @@ class AlertManager(private val context: Context) {
             putExtra("EEW_DEPTH", safeDepth)
             putExtra("EEW_TIME", safeTime)
             putExtra("EEW_REPORT_NUM", eewData.reportNum.toString())
-            // 必须带上 FLAG_ACTIVITY_NEW_TASK，否则从后台服务启动界面会崩溃
+            if (epicenterValid) {
+                putExtra("EEW_LATITUDE", eewData.latitude)
+                putExtra("EEW_LONGITUDE", eewData.longitude)
+            }
+            if (distanceKm != null) putExtra("EEW_DISTANCE_KM", distanceKm)
+            if (localIntensity != null) putExtra("EEW_LOCAL_INTENSITY", localIntensity)
+            if (countdown != null) putExtra("EEW_COUNTDOWN", countdown)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
 
@@ -191,6 +282,10 @@ class AlertManager(private val context: Context) {
 
             mediaPlayer = player
 
+            // 初始化重置为最大音量
+            currentAlarmVolume = 1.0f
+            player.setVolume(currentAlarmVolume, currentAlarmVolume)
+
             var playCount = 0
             player.setOnCompletionListener { mp ->
                 playCount++
@@ -208,14 +303,45 @@ class AlertManager(private val context: Context) {
         }
     }
 
-    private fun wakeUpScreen() {
+    /**
+     * 实现平滑的 Ducking（压低音量）机制
+     * 使用 ValueAnimator 在 400ms 内平滑过渡警报音量，避免割裂感
+     */
+    private fun fadeAlarmVolume(targetVolume: Float) {
+        ttsHandler.post {
+            volumeAnimator?.cancel()
+            volumeAnimator = ValueAnimator.ofFloat(currentAlarmVolume, targetVolume).apply {
+                duration = 400L // 400ms 缓入缓出平滑过渡
+                addUpdateListener { anim ->
+                    val v = anim.animatedValue as Float
+                    currentAlarmVolume = v
+                    try {
+                        mediaPlayer?.setVolume(v, v)
+                    } catch (e: Exception) {
+                        // 忽略媒体播放器已释放时的异常
+                    }
+                }
+                start()
+            }
+        }
+    }
+
+    private fun wakeUpScreen(countdownSec: Int? = null) {
         wakeLock?.let { if (it.isHeld) it.release() }
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+
+        val holdMs = if (countdownSec != null) {
+            (countdownSec + 60) * 1000L
+        } else {
+            60_000L
+        }
+
         wakeLock = powerManager.newWakeLock(
             PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
             "EEWReceiver::AlertWakeLock"
         )
-        wakeLock?.acquire(60000L)
+        wakeLock?.acquire(holdMs)
+        Log.d("EEW_Receiver", "WakeLock 已获取，持续时间：${holdMs / 1000}秒")
     }
 
     private fun vibratePhone() {
@@ -237,9 +363,135 @@ class AlertManager(private val context: Context) {
         }
     }
 
+    // ================================================================
+    // 任务8：TTS 语音播报核心方法
+    // ================================================================
+
+    private fun startTtsAnnouncements(countdown: Int?) {
+        // 取消上一次触发的所有待执行 TTS 任务
+        pendingTtsRunnables.forEach { ttsHandler.removeCallbacks(it) }
+        pendingTtsRunnables.clear()
+
+        // 初始化 TTS 引擎（仅首次，复用已有实例）
+        if (tts == null) {
+            tts = TextToSpeech(context) { status ->
+                if (status != TextToSpeech.SUCCESS) {
+                    Log.w("EEW_Receiver", "TTS 引擎初始化失败，status=$status")
+                    return@TextToSpeech
+                }
+
+                // 强制将 TTS 输出通道设为 ALARM (闹钟音量)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    val audioAttributes = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                    tts?.setAudioAttributes(audioAttributes)
+                }
+
+                // 语言优先级调整：大陆简体中文优先
+                val locales = listOf(
+                    Locale.SIMPLIFIED_CHINESE, // 第一志愿：大陆简体
+                    Locale("zh", "TW"),        // 第二志愿：台湾繁体
+                    Locale.CHINESE             // 保底志愿：通用中文
+                )
+                val instance = tts ?: return@TextToSpeech
+                for (locale in locales) {
+                    val result = instance.setLanguage(locale)
+                    if (result != TextToSpeech.LANG_MISSING_DATA &&
+                        result != TextToSpeech.LANG_NOT_SUPPORTED) {
+                        Log.d("EEW_Receiver", "TTS 语言设置成功：$locale")
+                        break
+                    }
+                }
+
+                // 绑定播报进度监听器，实现说话时 Ducking (音量压低到40%)
+                instance.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {
+                        fadeAlarmVolume(0.4f) // TTS 开口说话，警报音平滑压低到 40%
+                    }
+
+                    override fun onDone(utteranceId: String?) {
+                        fadeAlarmVolume(1.0f) // TTS 说完，警报音平滑恢复到 100%
+                    }
+
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) {
+                        fadeAlarmVolume(1.0f) // 发生错误，确保恢复 100%
+                    }
+                })
+            }
+        }
+
+        // 构建播报计划并逐条投递
+        for ((delayMs, text) in buildTtsSchedule(countdown)) {
+            val runnable = Runnable {
+                if (!userSilenced) {
+                    val utteranceId = "eew_tts_${System.currentTimeMillis()}"
+
+                    // 利用 Bundle() 设置参数，确保兼容绝大多数安卓版本的 STREAM 设定
+                    val params = Bundle().apply {
+                        putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM)
+                    }
+
+                    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+                    Log.d("EEW_Receiver", "TTS 播报（delay=${delayMs}ms）：$text")
+                }
+            }
+            pendingTtsRunnables.add(runnable)
+            ttsHandler.postDelayed(runnable, delayMs)
+        }
+    }
+
+    private fun buildTtsSchedule(countdown: Int?): List<Pair<Long, String>> {
+        val schedule = mutableListOf<Pair<Long, String>>()
+
+        if (countdown == null || countdown <= 0) {
+            schedule.add(800L to "地震预警！请立即注意安全！")
+            return schedule
+        }
+
+        val countdownMs = countdown * 1000L
+
+        // 初始播报
+        schedule.add(800L to "地震预警！约${countdown}秒后震波抵达！")
+
+        if (countdown > 30) {
+            val d = countdownMs - 30_000L
+            if (d > 2_000L) schedule.add(d to "30秒后震波抵达")
+        }
+
+        if (countdown > 20) {
+            val d = countdownMs - 20_000L
+            if (d > 2_000L) schedule.add(d to "20秒后震波抵达")
+        }
+
+        // 10秒起逐秒倒数
+        for (sec in 10 downTo 1) {
+            val d = countdownMs - (sec * 1_000L)
+            if (d > 1_500L) schedule.add(d to "$sec")
+        }
+
+        // 归零播报
+        schedule.add(countdownMs + 300L to "地震波已抵达")
+
+        return schedule
+    }
+
+    // ================================================================
+
     @Synchronized
     fun release() {
         userSilenced = true
+
+        // 释放期间取消音量渐变动画防止内存泄漏
+        ttsHandler.post {
+            volumeAnimator?.cancel()
+            volumeAnimator = null
+        }
+        currentAlarmVolume = 1.0f
+
+        // 停止并释放警报音
         try {
             mediaPlayer?.let {
                 if (it.isPlaying) it.stop()
@@ -250,9 +502,22 @@ class AlertManager(private val context: Context) {
         } finally {
             mediaPlayer = null
         }
+
         vibrator?.cancel()
         vibrator = null
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
+
+        // 取消所有待播 TTS，关闭 TTS 引擎
+        pendingTtsRunnables.forEach { ttsHandler.removeCallbacks(it) }
+        pendingTtsRunnables.clear()
+        try {
+            tts?.stop()
+            tts?.shutdown()
+        } catch (e: Exception) {
+            Log.e("EEW_Receiver", "释放 TTS 资源失败: ${e.message}")
+        } finally {
+            tts = null
+        }
     }
 }

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EEW-Receiver 地震预警接收器</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117;
+      color: #e1e4e8;
+      min-height: 100vh;
+    }
+    header {
+      background: linear-gradient(135deg, #1a1f2e 0%, #0d1117 100%);
+      border-bottom: 1px solid #21262d;
+      padding: 24px;
+      text-align: center;
+    }
+    header img {
+      max-width: 100%;
+      max-height: 120px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #58a6ff;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      color: #8b949e;
+      font-size: 1rem;
+    }
+    main {
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 0 24px;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .card h2 {
+      font-size: 1.2rem;
+      color: #58a6ff;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card p, .card li {
+      color: #c9d1d9;
+      line-height: 1.7;
+      margin-bottom: 8px;
+    }
+    .card ul {
+      padding-left: 20px;
+    }
+    .badge {
+      display: inline-block;
+      background: #1f6feb;
+      color: white;
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 12px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: #238636;
+      color: white;
+      text-decoration: none;
+      padding: 14px 28px;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      transition: background 0.2s;
+      margin-top: 8px;
+    }
+    .download-btn:hover { background: #2ea043; }
+    .download-btn svg { width: 20px; height: 20px; }
+    .version-tag {
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 0.85rem;
+      color: #8b949e;
+      margin-left: 8px;
+    }
+    .tech-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .tech-tag {
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 0.85rem;
+      color: #58a6ff;
+    }
+    .warning-box {
+      background: #3d2b1f;
+      border: 1px solid #f0883e;
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #f0883e;
+      font-size: 0.9rem;
+      margin-top: 12px;
+    }
+    footer {
+      text-align: center;
+      padding: 32px 24px;
+      color: #484f58;
+      font-size: 0.85rem;
+      border-top: 1px solid #21262d;
+      margin-top: 40px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="/mybanner.png" alt="EEW Receiver Banner" onerror="this.style.display='none'" />
+    <h1>EEW-Receiver <span style="font-size:1.2rem">地震预警接收器</span></h1>
+    <p class="subtitle">实时接收台湾地震预警 · 适用于福建/浙江沿海地区</p>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2>📥 下载 APK <span class="version-tag">v1.3.5</span></h2>
+      <p>直接下载安装包到您的 Android 设备，无需 Google Play。</p>
+      <a href="/download" class="download-btn">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 16l-6-6h4V4h4v6h4l-6 6zm-8 4h16v-2H4v2z"/></svg>
+        下载 EEW-Receiver v1.3.5.apk
+      </a>
+      <div class="warning-box">
+        ⚠️ 安装时请允许"来自未知来源的应用"权限，这是 Google Play 以外的应用的标准安装流程。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📌 项目目的</h2>
+      <p>大陆的地震预警系统目前尚未接入<strong>台湾中央气象署（CWA）</strong>的地震预警。作为受台湾地震影响明显的福建/浙江地区，经常有明显震感，却得不到任何预警。</p>
+      <p>本项目使用 <strong>Wolfx</strong> 的 WebSocket API 接口，<strong>不使用 Google FCM 推送</strong>，确保在大陆网络环境下第一时间收到预警。</p>
+    </div>
+
+    <div class="card">
+      <h2>✨ 核心功能</h2>
+      <ul>
+        <li>实时 WebSocket 连接，毫秒级接收预警推送</li>
+        <li>达到震级阈值时触发<strong>全屏警报、声音和震动</strong></li>
+        <li>支持锁屏/息屏状态下弹出全屏预警</li>
+        <li>使用系统<strong>闹钟音量通道</strong>，不受静音/免打扰影响</li>
+        <li>前台服务保活，支持多种数据源选择</li>
+        <li>支持自定义震级阈值</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>🛠️ 技术架构</h2>
+      <div class="tech-tags">
+        <span class="tech-tag">Kotlin</span>
+        <span class="tech-tag">Jetpack Compose</span>
+        <span class="tech-tag">OkHttp WebSocket</span>
+        <span class="tech-tag">Foreground Service</span>
+        <span class="tech-tag">Android Min SDK 24</span>
+        <span class="tech-tag">Gson</span>
+        <span class="tech-tag">Gradle KTS</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📖 使用说明</h2>
+      <ul>
+        <li><strong>修改阈值</strong>：打开 APP 进入设置，修改全屏警报的震级阈值（默认为 3）</li>
+        <li><strong>授予权限</strong>：确保已授予所有必要的通知权限，并配置防杀后台相关权限</li>
+        <li><strong>安装后测试</strong>：点击"模拟触发"按钮，测试全屏弹窗警报功能是否正常</li>
+        <li><strong>数据源</strong>：默认内建台湾中央气象署数据源，可自行勾选更多源</li>
+      </ul>
+    </div>
+  </main>
+
+  <footer>
+    <p>EEW-Receiver &copy; 2024 · 个人项目，由 Gemini AI 辅助开发 · 数据来源：<a href="https://wolfx.jp/apidoc_zh" style="color:#58a6ff" target="_blank">Wolfx API</a></p>
+  </footer>
+</body>
+</html>

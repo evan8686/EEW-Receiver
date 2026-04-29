@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -23,8 +24,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -135,10 +139,36 @@ fun SettingsScreen() {
     var threshold by remember { mutableStateOf(DataManager.getThreshold(context)) }
     var sourceList by remember { mutableStateOf(DataManager.getSources(context)) }
 
+    // ========== 本地预估烈度阈值状态 ==========
+    // 读取已保存值，0 表示不启用
+    var localIntensityThreshold by remember {
+        mutableStateOf(DataManager.getLocalIntensityThreshold(context))
+    }
+
+    // ========== 用户坐标状态 ==========
+    // 从 SharedPreferences 读取已保存的坐标
+    val savedLat = DataManager.getLatitude(context)
+    val savedLon = DataManager.getLongitude(context)
+
+    // 👇 新增：如果检测到没有保存过坐标（如首次安装），直接静默保存默认值到系统存储 👇
+    LaunchedEffect(Unit) {
+        if (savedLat.isNaN() || savedLon.isNaN()) {
+            DataManager.saveLatitude(context, 25.996985)
+            DataManager.saveLongitude(context, 119.419210)
+        }
+    }
+
+    var latitudeText by remember { mutableStateOf(if (savedLat.isNaN()) "25.996985" else savedLat.toString()) }
+    var longitudeText by remember { mutableStateOf(if (savedLon.isNaN()) "119.419210" else savedLon.toString()) }
+
+    // 各输入框的错误提示信息，null 表示无错误
+    var latitudeError by remember { mutableStateOf<String?>(null) }
+    var longitudeError by remember { mutableStateOf<String?>(null) }
+
     // 状态控制
     var showAddDialog by remember { mutableStateOf(false) }
-    var showHelpDialog by remember { mutableStateOf(false) } // 新增：帮助弹窗状态
-    var sourcesExpanded by remember { mutableStateOf(false) } // 新增：折叠面板状态
+    var showHelpDialog by remember { mutableStateOf(false) }
+    var sourcesExpanded by remember { mutableStateOf(false) }
 
     var newSourceName by remember { mutableStateOf("") }
     var newSourceUrl by remember { mutableStateOf("") }
@@ -155,7 +185,7 @@ fun SettingsScreen() {
             Text("预警设置", style = MaterialTheme.typography.titleLarge)
             IconButton(onClick = { showHelpDialog = true }) {
                 Icon(
-                    imageVector = Icons.Filled.Info, // 🚨 这里修改为自带的 Info 图标
+                    imageVector = Icons.Filled.Info,
                     contentDescription = "帮助说明",
                     tint = MaterialTheme.colorScheme.primary
                 )
@@ -221,13 +251,159 @@ fun SettingsScreen() {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // ================= 阈值卡片 =================
+        // 判断本地预估烈度是否开启
+        val isLocalIntensityEnabled = localIntensityThreshold > 0
+
+        // ================= 阈值卡片 1 (震源震级阈值) =================
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("警报触发阈值: ${String.format("%.1f", threshold)} 级", style = MaterialTheme.typography.titleMedium)
+                val thresholdLabel = if (isLocalIntensityEnabled) {
+                    "警报触发阈值: 未启用，已使用本地预估过滤器"
+                } else {
+                    "警报触发阈值: ${String.format("%.1f", threshold)} 级"
+                }
+
+                Text(
+                    text = thresholdLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (isLocalIntensityEnabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface
+                )
+
                 Slider(
-                    value = threshold, onValueChange = { threshold = it },
-                    valueRange = 1f..9f, steps = 79, modifier = Modifier.fillMaxWidth()
+                    value = threshold,
+                    onValueChange = { threshold = it },
+                    valueRange = 1f..9f,
+                    steps = 15, // 优化2：(9-1)/0.5 - 1 = 15个间隔，实现每0.5一个点
+                    enabled = !isLocalIntensityEnabled, // 优化1：启用烈度阈值时禁用本滑块
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // ================= 本地预估烈度阈值卡片 2 =================
+        Card(modifier = Modifier.fillMaxWidth()) {
+            // 优化1：当未启用时，整体加上视觉置灰效果 (alpha) 但保持可交互
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .alpha(if (isLocalIntensityEnabled) 1f else 0.6f)
+            ) {
+                // 标题行：动态展示当前选值
+                val thresholdLabel = if (localIntensityThreshold == 0) "不启用" else "${localIntensityThreshold} 度"
+                Text(
+                    "本地预估烈度触发阈值：$thresholdLabel",
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                // 说明文字
+                Text(
+                    text = if (localIntensityThreshold == 0)
+                        "当前使用原有的震源震级阈值逻辑触发弹窗"
+                    else
+                        "当本地预估烈度 ≥ $localIntensityThreshold 度时触发全屏弹窗（将替代震级阈值逻辑）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (localIntensityThreshold == 0)
+                        MaterialTheme.colorScheme.outline
+                    else
+                        MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+                )
+
+                // 滑动条：0（不启用）到 12（12度），步进 1
+                Slider(
+                    value = localIntensityThreshold.toFloat(),
+                    onValueChange = { localIntensityThreshold = it.toInt() },
+                    valueRange = 0f..12f,
+                    steps = 11, // steps = 总刻度数 - 2，即 0~12 共13个值，steps=11
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // 两端刻度标注
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("不启用", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    Text("12度", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // ================= 用户坐标卡片 =================
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("我的位置坐标", style = MaterialTheme.typography.titleMedium)
+
+                // 优化4：带有超链接的可点击坐标描述文本
+                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                val locationDescString = androidx.compose.ui.text.buildAnnotatedString {
+                    append("用于计算本地预估烈度和P波到达时间。请填写您所在地的经纬度（")
+                    pushStringAnnotation(tag = "URL", annotation = "https://lbs.navinfo.com/picker/index.html")
+                    withStyle(style = androidx.compose.ui.text.SpanStyle(
+                        color = MaterialTheme.colorScheme.primary,
+                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                    )) {
+                        append("可在此处获取坐标")
+                    }
+                    pop()
+                    append("）。")
+                }
+
+                androidx.compose.foundation.text.ClickableText(
+                    text = locationDescString,
+                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.outline),
+                    onClick = { offset ->
+                        locationDescString.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                            .firstOrNull()?.let { annotation -> uriHandler.openUri(annotation.item) }
+                    },
+                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                )
+
+                // 纬度输入框（范围 -90 ~ 90）
+                OutlinedTextField(
+                    value = latitudeText,
+                    onValueChange = { input ->
+                        latitudeText = input
+                        // 实时清除之前的错误提示，等保存时再统一校验
+                        latitudeError = null
+                    },
+                    label = { Text("纬度（-90 ~ 90）") },
+                    placeholder = { Text("例如：26.0745") },
+                    isError = latitudeError != null,
+                    supportingText = {
+                        if (latitudeError != null) {
+                            Text(latitudeError!!, color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 经度输入框（范围 -180 ~ 180）
+                OutlinedTextField(
+                    value = longitudeText,
+                    onValueChange = { input ->
+                        longitudeText = input
+                        longitudeError = null
+                    },
+                    label = { Text("经度（-180 ~ 180）") },
+                    placeholder = { Text("例如：119.3062") },
+                    isError = longitudeError != null,
+                    supportingText = {
+                        if (longitudeError != null) {
+                            Text(longitudeError!!, color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
@@ -241,10 +417,64 @@ fun SettingsScreen() {
                     Toast.makeText(context, "请至少勾选一个订阅源！", Toast.LENGTH_SHORT).show()
                     return@Button
                 }
+
+                // ---- 坐标校验逻辑 ----
+                var coordValid = true
+
+                // 校验纬度：允许为空（表示不启用），若有值则必须是合法浮点数且在范围内
+                val latDouble: Double? = if (latitudeText.isBlank()) {
+                    null // 空值视为"不设置"
+                } else {
+                    val parsed = latitudeText.toDoubleOrNull()
+                    when {
+                        parsed == null -> {
+                            latitudeError = "请输入有效的数字"
+                            coordValid = false
+                            null
+                        }
+                        parsed < -90.0 || parsed > 90.0 -> {
+                            latitudeError = "纬度必须在 -90 到 90 之间"
+                            coordValid = false
+                            null
+                        }
+                        else -> parsed
+                    }
+                }
+
+                // 校验经度：同上
+                val lonDouble: Double? = if (longitudeText.isBlank()) {
+                    null
+                } else {
+                    val parsed = longitudeText.toDoubleOrNull()
+                    when {
+                        parsed == null -> {
+                            longitudeError = "请输入有效的数字"
+                            coordValid = false
+                            null
+                        }
+                        parsed < -180.0 || parsed > 180.0 -> {
+                            longitudeError = "经度必须在 -180 到 180 之间"
+                            coordValid = false
+                            null
+                        }
+                        else -> parsed
+                    }
+                }
+
+                if (!coordValid) return@Button
+
+                // 坐标合法，持久化保存（或删除）
+                if (latDouble != null) DataManager.saveLatitude(context, latDouble)
+                else DataManager.saveLatitude(context, Double.NaN)
+                if (lonDouble != null) DataManager.saveLongitude(context, lonDouble)
+                else DataManager.saveLongitude(context, Double.NaN)
+
+                // 保存本地预估烈度触发阈值（0=不启用，1-12=对应烈度度数）
+                DataManager.saveLocalIntensityThreshold(context, localIntensityThreshold)
+
                 DataManager.saveSources(context, sourceList)
                 DataManager.saveThreshold(context, threshold)
 
-                // 🚨 核心定向修复：替换原有的 stop/start 重启逻辑，改为无缝热重载指令
                 val reloadIntent = Intent(context, EewForegroundService::class.java).apply {
                     action = "ACTION_RELOAD_SOURCES"
                 }
@@ -260,6 +490,17 @@ fun SettingsScreen() {
         ) {
             Text("保存配置并生效")
         }
+
+        // 👇 新增的未保存提示说明（已居中并占满宽度） 👇
+        Text(
+            text = "在上方设置中所做的任何改动，都需要在保存后才能生效",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.outline,
+            textAlign = TextAlign.Center, // 设置文字居中对齐
+            modifier = Modifier
+                .fillMaxWidth() // 宽度撑满，确保相对于屏幕完美居中
+                .padding(top = 6.dp)
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -277,13 +518,12 @@ fun SettingsScreen() {
                             reportTime = currentTimeString,
                             reportNum = 1,
                             originTime = currentTimeString,
-                            hypoCenter = "模拟测试海域",
-                            latitude = 0.0, longitude = 0.0, magnitude = 7.0,
+                            hypoCenter = "[模拟测试]花莲外海",
+                            latitude = 23.9, longitude = 122.2, magnitude = 7.0,
                             depth = 10, maxIntensity = "6弱"
                         )
 
                         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            // 🚨 保持你原有的、干净的单发测试指令逻辑
                             val intent = Intent(context, EewForegroundService::class.java).apply {
                                 action = "ACTION_TEST_ALERT"
                                 putExtra("DUMMY_DATA", com.google.gson.Gson().toJson(dummyData))
@@ -304,7 +544,7 @@ fun SettingsScreen() {
 
         Column(modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(
-                text = "您安装的当前版本为1.3.5版本，您可随时访问Github仓库获取版本更新情况。该项目为个人测试项目，本人无软件开发经验。此 APP 由 Gemini 协助开发完成。仅供个人测试。",
+                text = "您安装的当前版本为2.0.0版本，您可随时访问Github仓库获取版本更新情况。\n\n免责声明：本应用提供的预估烈度与倒计时均为算法模型推演的【参考值】，绝非官方指导。受网络、设备及算法限制，可能存在延迟、误差或误报。请务必结合实际体感与官方渠道通报采取避险措施。开发者按“现状”提供本应用，若用户因单一依赖本应用数据而导致任何生命、财产损害或直接/间接损失，开发者概不承担任何法律责任。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline
             )
