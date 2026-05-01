@@ -3,6 +3,7 @@ package com.evan8686.eewreceiver
 import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.TimeZone
 import kotlin.math.*
 
 /**
@@ -114,7 +115,7 @@ object EarthquakeCalculator {
     /**
      * 计算 P 波到达用户所在地的剩余秒数
      * 公式：到达时刻 = 发震时刻 + 距离 / P波速度
-     *      倒计时 = 到达时刻 - 当前时刻（取整秒，最小为 0）
+     * 倒计时 = 到达时刻 - 当前时刻（取整秒，最小为 0）
      *
      * @param distanceKm 震中距（公里）
      * @param originTimeMillis 发震时刻（毫秒时间戳）
@@ -155,13 +156,25 @@ object EarthquakeCalculator {
 
     /**
      * 将 EewData.originTime 字符串（如 "2026-04-28 00:11:30"）解析为毫秒时间戳
-     * 支持多种常见格式，解析失败时返回 null
+     * 🚨 2.0 升级：引入 type 字段进行强时区绑定，彻底解决跨时区倒计时错乱问题
+     * * @param originTimeStr 发震时间字符串
+     * @param type 数据源类型（用于判断所属时区）
      */
-    fun parseOriginTimeMillis(originTimeStr: String?): Long? {
+    fun parseOriginTimeMillis(originTimeStr: String?, type: String?): Long? {
         if (originTimeStr.isNullOrBlank() || originTimeStr == "null") return null
+
+        // 根据报文 type 强制绑定对应的物理时区
+        val targetTimeZone = if (type == "jma_eew") {
+            TimeZone.getTimeZone("GMT+09:00") // 日本气象厅：强制 UTC+9
+        } else {
+            // 包括 cenc_eew, cwa_eew, fj_eew, sc_eew, cq_eew 以及未知源，默认全部按照大中华区时区处理
+            TimeZone.getTimeZone("GMT+08:00") // 默认：强制 UTC+8 (北京/台北时间)
+        }
+
         for (fmt in TIME_FORMATS) {
             try {
                 val sdf = SimpleDateFormat(fmt, Locale.getDefault())
+                sdf.timeZone = targetTimeZone // 赋予时区滤镜
                 sdf.isLenient = false
                 val date = sdf.parse(originTimeStr.trim())
                 if (date != null) return date.time

@@ -10,8 +10,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -132,6 +134,7 @@ fun HistoryScreen() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SettingsScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -169,6 +172,9 @@ fun SettingsScreen() {
     var showAddDialog by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
     var sourcesExpanded by remember { mutableStateOf(false) }
+
+    // 用于记录当前准备删除的自定义源
+    var sourceToDelete by remember { mutableStateOf<ApiSource?>(null) }
 
     var newSourceName by remember { mutableStateOf("") }
     var newSourceUrl by remember { mutableStateOf("") }
@@ -223,9 +229,29 @@ fun SettingsScreen() {
                 AnimatedVisibility(visible = sourcesExpanded) {
                     Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
                         sourceList.forEachIndexed { index, source ->
+                            // 前5个（索引 0-4）是默认源，5及之后的是用户自定义源
+                            val isCustomSource = index >= 5
+
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .combinedClickable(
+                                        onClick = {
+                                            // 点击整行也能切换选中状态，优化触摸体验
+                                            val newList = sourceList.toMutableList()
+                                            newList[index] = source.copy(isSelected = !source.isSelected)
+                                            sourceList = newList
+                                        },
+                                        onLongClick = {
+                                            if (isCustomSource) {
+                                                sourceToDelete = source
+                                            } else {
+                                                Toast.makeText(context, "预置节点无法删除", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    )
+                                    .padding(vertical = 6.dp)
                             ) {
                                 Checkbox(
                                     checked = source.isSelected,
@@ -237,12 +263,17 @@ fun SettingsScreen() {
                                 )
                                 Column(modifier = Modifier.padding(start = 8.dp)) {
                                     Text(source.name, style = MaterialTheme.typography.bodyMedium)
-                                    Text(source.url, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                                    // 隐藏了原先的 url 显示，改为优雅的文字说明
+                                    if (isCustomSource) {
+                                        Text("自定义源 (长按可删除)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                    } else {
+                                        Text("预置节点", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
+                                    }
                                 }
                             }
                         }
                         TextButton(onClick = { showAddDialog = true }, modifier = Modifier.padding(top = 8.dp)) {
-                            Text("+ 添加自定义源")
+                            Text("+ 添加自定义源（调试用，一般用户不建议使用）")
                         }
                     }
                 }
@@ -512,15 +543,25 @@ fun SettingsScreen() {
                 Button(
                     onClick = {
                         val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+
+                        // 🚨 核心修复：强制使用北京时间（UTC+8）来格式化当前的系统时间。
+                        // 这样无论用户设备时间在哪个时区，生成的文本永远是北京时间，能与解析器完美匹配。
+                        sdf.timeZone = java.util.TimeZone.getTimeZone("GMT+08:00")
+
                         val currentTimeString = sdf.format(java.util.Date())
+
                         val dummyData = EewData(
+                            type = "cwa_eew", // 明确指定为国内源类型，确保触发计算器的 UTC+8 解析逻辑
                             id = System.currentTimeMillis().toString(),
                             reportTime = currentTimeString,
                             reportNum = 1,
                             originTime = currentTimeString,
                             hypoCenter = "[模拟测试]花莲外海",
-                            latitude = 23.9, longitude = 122.2, magnitude = 7.0,
-                            depth = 10, maxIntensity = "6弱"
+                            latitude = 23.9,
+                            longitude = 122.2,
+                            magnitude = 7.0,
+                            depth = 10,
+                            maxIntensity = "6弱"
                         )
 
                         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -664,6 +705,26 @@ fun SettingsScreen() {
             },
             dismissButton = {
                 TextButton(onClick = { showAddDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    // 3. 删除自定义源确认弹窗
+    if (sourceToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { sourceToDelete = null },
+            title = { Text("删除自定义源") },
+            text = { Text("确定要删除数据源「${sourceToDelete?.name}」吗？\n删除后需点击下方“保存配置并生效”才能生效。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val newList = sourceList.toMutableList()
+                    newList.remove(sourceToDelete)
+                    sourceList = newList
+                    sourceToDelete = null
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { sourceToDelete = null }) { Text("取消") }
             }
         )
     }

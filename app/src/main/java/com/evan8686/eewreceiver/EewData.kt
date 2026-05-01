@@ -3,6 +3,10 @@ package com.evan8686.eewreceiver
 import com.google.gson.annotations.SerializedName
 
 data class EewData(
+    // 🚨 新增：发报源类型 (用于后续绑定时区，例如 jma_eew, cenc_eew 等)
+    @SerializedName("type")
+    val type: String? = null,
+
     // 发报 ID (完美兼容中国大陆/台湾/福建/四川的 ID，以及日本的 EventID)
     // 注意：为了兼容有些源可能带有字母的 ID，这里将类型从 Long 改为了 String
     @SerializedName(value = "ID", alternate = ["EventID"])
@@ -46,14 +50,33 @@ data class EewData(
     @SerializedName("MaxIntensity")
     val maxIntensity: String? = null
 ) {
-    // 将数据转换为通知栏显示的直观文本
+
+    // ================================================================
+    // UI 辅助显示方法
+    // ================================================================
+
+    /**
+     * 获取带有正确时区后缀的发震时间字符串
+     */
+    fun getFormattedTime(): String {
+        val baseTime = if (originTime.isNullOrBlank() || originTime == "null") "未知" else originTime
+        if (baseTime == "未知") return baseTime
+
+        return if (type == "jma_eew") {
+            "$baseTime (UTC+9)" // 日本气象厅
+        } else {
+            "$baseTime (UTC+8)" // 中国大陆、台湾等大中华区
+        }
+    }
+
+    // 将数据转换为通知栏和近期记录列表中显示的直观文本
     fun toReadableText(): String {
         // 如果福建源没有深度和烈度，我们显示为“未知”
         val depthText = if (depth != null) "${depth}km" else "未知"
         val intensityText = maxIntensity ?: "未知"
 
         return "【地震预警】第 ${reportNum} 报\n" +
-                "发震时间：$originTime\n" +
+                "发震时间：${getFormattedTime()}\n" +  // 🚨 替换：这里使用了带有后缀的时间
                 "震源地：$hypoCenter\n" +
                 "震级：${magnitude} 级\n" +
                 "最大震度：$intensityText\n" +

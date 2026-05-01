@@ -126,8 +126,8 @@ class AlertManager(private val context: Context) {
             ).toInt()
         } else null
 
-        // 计算 P 波到达倒计时（有距离才计算）
-        val originTimeMillis = EarthquakeCalculator.parseOriginTimeMillis(eewData.originTime)
+        // 🚨 计算 P 波到达倒计时（有距离才计算）：传入 eewData.type 进行强时区解析 🚨
+        val originTimeMillis = EarthquakeCalculator.parseOriginTimeMillis(eewData.originTime, eewData.type)
         val countdown: Int? = if (distanceKm != null && originTimeMillis != null) {
             EarthquakeCalculator.calculateCountdown(distanceKm, originTimeMillis)
         } else null
@@ -193,7 +193,8 @@ class AlertManager(private val context: Context) {
 
     private fun sendEventNotification(eewData: EewData, title: String, safeIntensity: String, isEmergency: Boolean) {
         val safeDepth = if (eewData.depth != null) "${eewData.depth}km" else "未知"
-        val safeTime = if (eewData.originTime.isNullOrEmpty() || eewData.originTime == "null") "未知" else eewData.originTime
+        // 🚨 更新为调用 EewData 新增的带时区后缀的方法
+        val safeTime = eewData.getFormattedTime()
 
         // 普通点击事件（进主页）
         val mainIntent = Intent(context, MainActivity::class.java).apply {
@@ -233,16 +234,16 @@ class AlertManager(private val context: Context) {
         epicenterValid: Boolean = false
     ) {
         val safeDepth = if (eewData.depth != null) "${eewData.depth}km" else "未知"
-        val safeTime =
-            if (eewData.originTime.isNullOrEmpty() || eewData.originTime == "null") "未知"
-            else eewData.originTime
+
+        // 🚨 替换：调用 getFormattedTime() 获取带有 (UTC+8) 或 (UTC+9) 后缀的时间字符串
+        val safeTime = eewData.getFormattedTime()
 
         val intent = Intent(context, LockScreenAlertActivity::class.java).apply {
             putExtra("EEW_MAGNITUDE", eewData.magnitude.toString())
             putExtra("EEW_INTENSITY", safeIntensity)
             putExtra("EEW_HYPOCENTER", safeHypoCenter)
             putExtra("EEW_DEPTH", safeDepth)
-            putExtra("EEW_TIME", safeTime)
+            putExtra("EEW_TIME", safeTime) // 这里直接传给弹窗，弹窗会原样显示
             putExtra("EEW_REPORT_NUM", eewData.reportNum.toString())
             if (epicenterValid) {
                 putExtra("EEW_LATITUDE", eewData.latitude)

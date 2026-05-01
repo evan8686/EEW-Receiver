@@ -73,11 +73,11 @@ object DataManager {
 
     // 🚨 提取默认源列表为私有方法，防止重复代码，方便容灾重置时统一调用
     private fun getDefaultSources() = listOf(
-        ApiSource("台湾中央气象署 (CWA)", "wss://ws-api.wolfx.jp/cwa_eew", true),
+        ApiSource("台湾地区中央气象署 (CWA)", "wss://ws-api.wolfx.jp/cwa_eew", true),
         ApiSource("中国地震台网 (CENC)", "wss://ws-api.wolfx.jp/cenc_eew", false),
         ApiSource("福建地震局 (FJ)", "wss://ws-api.wolfx.jp/fj_eew", false),
         ApiSource("四川地震局 (SC)", "wss://ws-api.wolfx.jp/sc_eew", false),
-        ApiSource("东亚地区 (ALL)", "wss://ws-api.wolfx.jp/all_eew", false)
+        ApiSource("监控以上所有 (ALL)", "wss://ws-api.wolfx.jp/all_eew", false)
     )
 
     // 🚨 加上 @Synchronized 锁，防止多线程并发保存时文件损坏
