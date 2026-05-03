@@ -490,11 +490,10 @@ fun AlertScreenUI(alertData: AlertUiData, onDismiss: () -> Unit) {
 
             // ── 免责声明小字 ─────────────────────────────────────────
             Text(
-                text = "*本页面信息为计算和预估数据，相关描述仅供参考。" +
-                        "不构成法定意义上的指导意见。请依据实际情况采取必要避险措施。",
+                text = "*本页面信息为计算和预估数据，相关描述仅供参考。不构成法定意义上的指导意见。\n请依据实际情况采取必要避险措施。", // 👈 核心修改：合并了字符串，并在“请依据”前加入了 \n
                 fontSize = 11.sp,
                 color = Color.White.copy(alpha = 0.6f),
-                textAlign = TextAlign.Center,
+                textAlign = TextAlign.Center, // 👈 这行配置保证了上下两行都会居中
                 lineHeight = 16.sp
             )
 
