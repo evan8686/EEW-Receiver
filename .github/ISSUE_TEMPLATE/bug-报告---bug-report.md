@@ -14,7 +14,15 @@ assignees: ''
 ---
 
 ### 1. 手机型号 / Phone Model
+
+
 ### 2. OS 和系统版本 / OS & System Version
+
+
 ### 3. 本应用的版本 / App Version
+
+
 ### 4. 具体问题描述与详细复现步骤 / Detailed Description & Reproduction Steps
+
+
 ### 5. 附上必要的截图或日志数据 / Necessary Screenshots or Logs
