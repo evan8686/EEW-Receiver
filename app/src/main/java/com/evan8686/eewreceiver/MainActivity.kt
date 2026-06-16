@@ -138,6 +138,7 @@ fun HistoryScreen() {
 @Composable
 fun SettingsScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
 
     var threshold by remember { mutableStateOf(DataManager.getThreshold(context)) }
     var sourceList by remember { mutableStateOf(DataManager.getSources(context)) }
@@ -370,15 +371,14 @@ fun SettingsScreen() {
                 Text("我的位置坐标", style = MaterialTheme.typography.titleMedium)
 
                 // 优化4：带有超链接的可点击坐标描述文本
-                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
                 val locationDescString = androidx.compose.ui.text.buildAnnotatedString {
-                    append("用于计算本地预估烈度和P波到达时间。请填写您所在地的经纬度（")
+                    append("用于计算本地预估烈度和P波到达时间。请填写您所在地的经纬度。预置初始坐标位于福州（")
                     pushStringAnnotation(tag = "URL", annotation = "https://lbs.navinfo.com/picker/index.html")
                     withStyle(style = androidx.compose.ui.text.SpanStyle(
                         color = MaterialTheme.colorScheme.primary,
                         textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
                     )) {
-                        append("可在此处获取坐标")
+                        append("可在此处获取您的坐标")
                     }
                     pop()
                     append("）。")
@@ -524,7 +524,7 @@ fun SettingsScreen() {
 
         // 👇 新增的未保存提示说明（已居中并占满宽度） 👇
         Text(
-            text = "在上方设置中所做的任何改动，都需要在保存后才能生效",
+            text = "在上方所做的任何改动，都需要在保存后才能生效",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.outline,
             textAlign = TextAlign.Center, // 设置文字居中对齐
@@ -581,27 +581,89 @@ fun SettingsScreen() {
             }
         }
 
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // ================= 应急资源 =================
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("应急资源", style = MaterialTheme.typography.titleMedium)
+
+                // 按钮1
+                Button(
+                    onClick = { uriHandler.openUri("https://cloud.kepuchina.cn/emergency") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                ) {
+                    Text("国家应急科普资源库(应急知识)")
+                }
+                Text(
+                    text = "应急管理部新闻宣传司官方提供的应急知识库",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 按钮2
+                val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+                Button(
+                    onClick = {
+                        val textToCopy = "人防战略应急救援包国标版末日生存家庭应急物资储备包消防灾逃生【包邮】\n" +
+                                "【下单链接】https://m.tb.cn/h.Rnj8VX9\n" +
+                                "1覆\uD83D\uDC4BZHI4\$aPOsgU9TxFp\$:// CA1710,打開/"
+                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(textToCopy))
+                        Toast.makeText(context, "链接已复制，请打开淘宝自动跳转，或在搜索框粘贴", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("家庭应急资源包(应急物资包)")
+                }
+                Text(
+                    text = "防灾必备的应急资源包一次配齐，未雨绸缪",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(32.dp))
 
         Column(modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(
-                text = "您安装的当前版本为2.0.0版本，您可随时访问Github仓库获取版本更新情况。\n\n免责声明：本应用提供的预估烈度与倒计时均为算法模型推演的【参考值】，绝非官方指导。受网络、设备及算法限制，可能存在延迟、误差或误报。请务必结合实际体感与官方渠道通报采取避险措施。开发者按“现状”提供本应用，若用户因单一依赖本应用数据而导致任何生命、财产损害或直接/间接损失，开发者概不承担任何法律责任。",
+                text = "您安装的当前版本为2.0.0版本，您可随时访问项目仓库获取版本更新情况。\n\n免责声明：本应用提供的预估烈度与倒计时均为算法模型推演的【参考值】，绝非官方指导。受网络、设备及算法限制，可能存在延迟、误差或误报。请务必结合实际体感与官方渠道通报采取避险措施。开发者按“现状”提供本应用，若用户因单一依赖本应用数据而导致任何生命、财产的直接或间接损失，开发者概不承担任何法律责任。继续使用则表示您已理解并接受上述声明。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline
             )
             Spacer(modifier = Modifier.height(8.dp))
-            val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+
+            // 👇 修改后的项目仓库链接部分 👇
             val annotatedLinkString = androidx.compose.ui.text.buildAnnotatedString {
                 append("项目仓库：")
+
+                // Github 链接
                 pushStringAnnotation(tag = "URL", annotation = "https://github.com/evan8686/EEW-Receiver")
                 withStyle(style = androidx.compose.ui.text.SpanStyle(
                     color = MaterialTheme.colorScheme.primary,
                     textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
                 )) {
-                    append("https://github.com/evan8686/EEW-Receiver")
+                    append("Github")
+                }
+                pop()
+
+                append(" ；")
+
+                // Gitee 链接
+                pushStringAnnotation(tag = "URL", annotation = "https://gitee.com/evan8686/eew-receiver")
+                withStyle(style = androidx.compose.ui.text.SpanStyle(
+                    color = MaterialTheme.colorScheme.primary,
+                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                )) {
+                    append("Gitee (大陆境内可访问)")
                 }
                 pop()
             }
+
             androidx.compose.foundation.text.ClickableText(
                 text = annotatedLinkString,
                 style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.outline),

@@ -408,7 +408,8 @@ fun AlertScreenUI(alertData: AlertUiData, onDismiss: () -> Unit) {
                 ) {
                     // 左侧：距离 + 倒计时
                     Column(
-                        modifier = Modifier.weight(1f),
+                        // 👇 物理防线：保留 weight 的同时，强行增加 end padding，保证不会越界
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
                         horizontalAlignment = Alignment.Start
                     ) {
                         // 距离震源地
@@ -431,20 +432,26 @@ fun AlertScreenUI(alertData: AlertUiData, onDismiss: () -> Unit) {
 
                         if (liveCountdown != null) {
                             if (liveCountdown!! > 0) {
+                                // 👇 动态字号核心逻辑
+                                val isThreeDigits = liveCountdown!! >= 100
+                                val numberFontSize = if (isThreeDigits) 56.sp else 72.sp // 3位数缩小字体
+                                val unitFontSize = if (isThreeDigits) 18.sp else 24.sp
+                                val unitBottomPadding = if (isThreeDigits) 8.dp else 12.dp
+
                                 // 倒计时进行中：显示大数字
                                 Row(verticalAlignment = Alignment.Bottom) {
                                     Text(
                                         text = liveCountdown.toString(),
-                                        fontSize = 72.sp,
+                                        fontSize = numberFontSize,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = Color.White
                                     )
                                     Text(
                                         text = "秒",
-                                        fontSize = 24.sp,
+                                        fontSize = unitFontSize,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White,
-                                        modifier = Modifier.padding(bottom = 12.dp, start = 4.dp)
+                                        modifier = Modifier.padding(bottom = unitBottomPadding, start = 4.dp)
                                     )
                                 }
                             } else {
@@ -490,7 +497,7 @@ fun AlertScreenUI(alertData: AlertUiData, onDismiss: () -> Unit) {
 
             // ── 免责声明小字 ─────────────────────────────────────────
             Text(
-                text = "*本页面信息为计算和预估数据，相关描述仅供参考。不构成法定意义上的指导意见。\n请依据实际情况采取必要避险措施。", // 👈 核心修改：合并了字符串，并在“请依据”前加入了 \n
+                text = "*本页面信息为计算和预估数据，仅供参考。", // 👈 核心修改：合并了字符串
                 fontSize = 11.sp,
                 color = Color.White.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center, // 👈 这行配置保证了上下两行都会居中
