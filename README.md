@@ -14,10 +14,10 @@
 ---
 ### 📱 应用截图
 
-<p align="center">
-  <img src="assets/Screenshot_1.png" height="500" />
-  <img src="assets/Screenshot_2.png" height="500" />
-  <img src="assets/Screenshot_3.jpg" height="500" />
+<p align="left">
+  <img src="assets/Screenshot_1.png" height="600" />
+  <img src="assets/Screenshot_2.png" height="600" />
+  <img src="assets/Screenshot_3.jpg" height="600" />
 </p>
 ---
 
