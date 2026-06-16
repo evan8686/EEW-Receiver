@@ -15,9 +15,9 @@
 ### 📱 应用截图
 
 <p align="center">
-  <img src="assets/screenshot_1.png" height="350" />
-  <img src="assets/screenshot_2.png" height="350" />
-  <img src="assets/screenshot_3.png" height="350" />
+  <img src="assets/Screenshot_1.png" height="350" />
+  <img src="assets/Screenshot_2.png" height="350" />
+  <img src="assetsScreenshot_3.jpg" height="350" />
 </p>
 ---
 
