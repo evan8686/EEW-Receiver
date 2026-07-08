@@ -79,7 +79,7 @@ data class EewData(
                 "发震时间：${getFormattedTime()}\n" +  // 🚨 替换：这里使用了带有后缀的时间
                 "震源地：$hypoCenter\n" +
                 "震级：${magnitude} 级\n" +
-                "最大震度：$intensityText\n" +
+                "最大烈度：$intensityText\n" +
                 "深度：$depthText"
     }
 }
