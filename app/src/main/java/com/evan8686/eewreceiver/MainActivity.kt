@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,6 +36,13 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.google.gson.Gson
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 class MainActivity : ComponentActivity() {
 
@@ -172,6 +180,10 @@ fun SettingsScreen() {
     // 状态控制
     var showAddDialog by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
+    var showRecommendDialog by remember { mutableStateOf(false) }
+    var recommendations by remember { mutableStateOf<RecommendationResponse?>(null) }
+    var isLoadingRecommendations by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
     var sourcesExpanded by remember { mutableStateOf(false) }
 
     // 用于记录当前准备删除的自定义源
@@ -605,21 +617,63 @@ fun SettingsScreen() {
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // 按钮2
-                val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+                val scope = rememberCoroutineScope()
                 Button(
                     onClick = {
-                        val textToCopy = "人防战略应急救援包国标版末日生存家庭应急物资储备包消防灾逃生【包邮】\n" +
-                                "【下单链接】https://m.tb.cn/h.Rnj8VX9\n" +
-                                "1覆\uD83D\uDC4BZHI4\$aPOsgU9TxFp\$:// CA1710,打開/"
-                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(textToCopy))
-                        Toast.makeText(context, "链接已复制，请打开淘宝自动跳转，或在搜索框粘贴", Toast.LENGTH_SHORT).show()
+                        showRecommendDialog = true
+                        isLoadingRecommendations = true
+                        loadError = null // 每次点击重置错误状态
+                        scope.launch(Dispatchers.IO) {
+                            val client = OkHttpClient.Builder()
+                                .connectTimeout(10, TimeUnit.SECONDS)
+                                .readTimeout(10, TimeUnit.SECONDS)
+                                .build()
+                            
+                            var success = false
+                            // 💡 兜底策略：最多尝试 3 次
+                            for (attempt in 1..3) {
+                                try {
+                                    val request = Request.Builder()
+                                        .url("https://raw.giteeusercontent.com/evan8686/used-for-eew-backup/raw/master/myrecommend.json?t=${System.currentTimeMillis()}")
+                                        .header("Cache-Control", "no-cache")
+                                        .build()
+                                    
+                                    val response = client.newCall(request).execute()
+                                    if (response.isSuccessful) {
+                                        val body = response.body?.string()
+                                        if (body != null) {
+                                            val data = Gson().fromJson(body, RecommendationResponse::class.java)
+                                            withContext(Dispatchers.Main) {
+                                                recommendations = data
+                                                isLoadingRecommendations = false
+                                                success = true
+                                            }
+                                            break // 成功后跳出重试循环
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("EEW_Receiver", "好物推荐加载重试 $attempt/3 失败: ${e.message}")
+                                }
+                                // 如果没成功，且还没到最后一次，稍微等一下再试
+                                if (!success && attempt < 3) {
+                                    kotlinx.coroutines.delay(1000) 
+                                }
+                            }
+
+                            if (!success) {
+                                withContext(Dispatchers.Main) {
+                                    isLoadingRecommendations = false
+                                    loadError = "抱歉，好物推荐数据异常，请稍后再查看"
+                                }
+                            }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("家庭应急资源包(应急物资包)")
+                    Text("作者的好物推荐")
                 }
                 Text(
-                    text = "防灾必备的应急资源包一次配齐，未雨绸缪",
+                    text = "开发者精选的防灾物资与生活好物分享",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier.padding(top = 4.dp)
@@ -790,4 +844,92 @@ fun SettingsScreen() {
             }
         )
     }
+
+    // 4. 作者的好物推荐弹窗
+    if (showRecommendDialog) {
+        AlertDialog(
+            onDismissRequest = { showRecommendDialog = false },
+            title = { Text("作者的好物推荐", fontWeight = FontWeight.Bold) },
+            text = {
+                Box(modifier = Modifier.heightIn(max = 450.dp)) {
+                    if (isLoadingRecommendations) {
+                        Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    } else if (recommendations != null && loadError == null) {
+                        val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+                        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                            Text(
+                                text = recommendations?.tips ?: "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                            recommendations?.categories?.forEach { category ->
+                                Text(
+                                    text = category.categoryName,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                                )
+                                category.items.forEach { item ->
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                            .clickable {
+                                                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(item.copyContent))
+                                                Toast.makeText(context, "已复制，请打开淘宝查看", Toast.LENGTH_SHORT).show()
+                                            },
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Text(item.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                            Text(item.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "更新时间: ${recommendations?.updateTime}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.End
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = loadError ?: "加载失败，请检查网络连接",
+                            color = if (loadError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(16.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showRecommendDialog = false }) { Text("关闭") }
+            }
+        )
+    }
 }
+
+data class RecommendationResponse(
+    val version: Int,
+    val updateTime: String,
+    val tips: String,
+    val categories: List<RecommendationCategory>
+)
+
+data class RecommendationCategory(
+    val categoryName: String,
+    val items: List<RecommendationItem>
+)
+
+data class RecommendationItem(
+    val title: String,
+    val desc: String,
+    val copyContent: String
+)
