@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 
 class EewForegroundService : Service() {
 
@@ -63,19 +64,46 @@ class EewForegroundService : Service() {
     }
 
     private fun handleMessage(message: String) {
-        if (!message.contains("\"HypoCenter\"") && !message.contains("\"Hypocenter\"")) {
+        // 🚨 增强兼容性：同时检测 Wolfx 的 HypoCenter/Hypocenter 和 FAN API 的 placeName 关键字
+        if (!message.contains("\"HypoCenter\"") && !message.contains("\"Hypocenter\"") && !message.contains("\"placeName\"")) {
             return
         }
 
         try {
-            val eewData = gson.fromJson(message, EewData::class.java)
+            val jsonObject = gson.fromJson(message, JsonObject::class.java)
+
+            // 1. 检查外层 type 过滤 initial 数据
+            val outerType = jsonObject.get("type")?.asString
+            if (outerType != null && outerType.contains("initial")) {
+                Log.d("EEW_Receiver", "收到 initial 类型数据，已忽略。")
+                return
+            }
+
+            // 2. 核心解析逻辑：处理 FAN API 的嵌套结构
+            val eewData: EewData? = if (jsonObject.has("Data") && jsonObject.get("Data").isJsonObject) {
+                // 📦 FAN API 模式：解析内部的 "Data" 对象
+                val dataJson = jsonObject.getAsJsonObject("Data")
+                val parsed = gson.fromJson(dataJson, EewData::class.java)
+
+                // 补全 type 字段（将外层 source 转换为 type，如 "cwa" -> "cwa_eew"）
+                // 这样可以复用原有的 getFormattedTime() 时区判定逻辑
+                val source = jsonObject.get("source")?.asString
+                if (parsed != null && source != null) {
+                    parsed.copy(type = "${source}_eew")
+                } else {
+                    parsed
+                }
+            } else {
+                // 📃 Wolfx 模式：直接解析根对象
+                gson.fromJson(message, EewData::class.java)
+            }
 
             if (eewData?.id.isNullOrEmpty()) {
                 Log.w("EEW_Receiver", "数据缺乏唯一 ID，无法处理，已抛弃。")
                 return
             }
 
-            Log.d("EEW_Receiver", "成功解析地震预警:\n${eewData.toReadableText()}")
+            Log.d("EEW_Receiver", "成功解析地震预警 [源: ${eewData.type}]:\n${eewData.toReadableText()}")
 
             val threshold = DataManager.getThreshold(this).toDouble()
 

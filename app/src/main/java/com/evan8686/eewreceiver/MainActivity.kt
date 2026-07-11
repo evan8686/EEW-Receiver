@@ -181,6 +181,8 @@ fun SettingsScreen() {
     var showAddDialog by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
     var showRecommendDialog by remember { mutableStateOf(false) }
+    var showFanWarningDialog by remember { mutableStateOf(false) }
+    var fanWarningDontShowAgain by remember { mutableStateOf(false) }
     var recommendations by remember { mutableStateOf<RecommendationResponse?>(null) }
     var isLoadingRecommendations by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
@@ -242,8 +244,8 @@ fun SettingsScreen() {
                 AnimatedVisibility(visible = sourcesExpanded) {
                     Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
                         sourceList.forEachIndexed { index, source ->
-                            // 前5个（索引 0-4）是默认源，5及之后的是用户自定义源
-                            val isCustomSource = index >= 5
+                            // 前 7 个（索引 0-6）是默认源，7 及之后的是用户自定义源
+                            val isCustomSource = index >= 7
 
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -253,8 +255,14 @@ fun SettingsScreen() {
                                         onClick = {
                                             // 点击整行也能切换选中状态，优化触摸体验
                                             val newList = sourceList.toMutableList()
-                                            newList[index] = source.copy(isSelected = !source.isSelected)
+                                            val newIsSelected = !source.isSelected
+                                            newList[index] = source.copy(isSelected = newIsSelected)
                                             sourceList = newList
+
+                                            // 🚨 任务三：检测到勾选 FAN API 时的风险提示
+                                            if (newIsSelected && source.name.contains("FAN API") && !DataManager.isFanWarningDismissed(context)) {
+                                                showFanWarningDialog = true
+                                            }
                                         },
                                         onLongClick = {
                                             if (isCustomSource) {
@@ -272,6 +280,11 @@ fun SettingsScreen() {
                                         val newList = sourceList.toMutableList()
                                         newList[index] = source.copy(isSelected = isChecked)
                                         sourceList = newList
+
+                                        // 🚨 任务三：检测到勾选 FAN API 时的风险提示
+                                        if (isChecked && source.name.contains("FAN API") && !DataManager.isFanWarningDismissed(context)) {
+                                            showFanWarningDialog = true
+                                        }
                                     }
                                 )
                                 Column(modifier = Modifier.padding(start = 8.dp)) {
@@ -286,7 +299,7 @@ fun SettingsScreen() {
                             }
                         }
                         TextButton(onClick = { showAddDialog = true }, modifier = Modifier.padding(top = 8.dp)) {
-                            Text("+ 添加自定义源（调试用，一般用户不建议使用）")
+                            Text("+ 添加自定义源（开发者调试用接口，不建议用户开启。不同订阅源字段名称差异巨大，未做后端解析匹配的自定义订阅链接无法解析和推送）")
                         }
                     }
                 }
@@ -634,7 +647,7 @@ fun SettingsScreen() {
                             for (attempt in 1..3) {
                                 try {
                                     val request = Request.Builder()
-                                        .url("https://raw.giteeusercontent.com/evan8686/used-for-eew-backup/raw/master/myrecommend.json?t=${System.currentTimeMillis()}")
+                                        .url("https://raw.giteeusercontent.com/evan8686/eewconfig/raw/master/myrecommend.json?t=${System.currentTimeMillis()}")
                                         .header("Cache-Control", "no-cache")
                                         .build()
                                     
@@ -911,6 +924,38 @@ fun SettingsScreen() {
             },
             confirmButton = {
                 TextButton(onClick = { showRecommendDialog = false }) { Text("关闭") }
+            }
+        )
+    }
+
+    // 5. FAN API 风险提示弹窗
+    if (showFanWarningDialog) {
+        AlertDialog(
+            onDismissRequest = { showFanWarningDialog = false },
+            title = { Text("数据源风险提示", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("FAN API目前仅推荐在Wolfx API异常时备份使用。若和wolfx API同时开启，可能出现异常（如报文解析冲突或重复推送）。建议仅 二选一 使用。")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { fanWarningDontShowAgain = !fanWarningDontShowAgain }
+                    ) {
+                        Checkbox(
+                            checked = fanWarningDontShowAgain,
+                            onCheckedChange = { fanWarningDontShowAgain = it }
+                        )
+                        Text("下次不再提示", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (fanWarningDontShowAgain) {
+                        DataManager.saveFanWarningDismissed(context, true)
+                    }
+                    showFanWarningDialog = false
+                }) { Text("我知道了") }
             }
         )
     }

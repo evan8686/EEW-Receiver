@@ -53,6 +53,15 @@ object DataManager {
         return if (raw.isNaN()) Double.NaN else raw.toDouble()
     }
 
+    // ========== FAN API 警告相关 ==========
+
+    fun saveFanWarningDismissed(context: Context, dismissed: Boolean) {
+        getPrefs(context).edit().putBoolean("fan_warning_dismissed", dismissed).apply()
+    }
+
+    fun isFanWarningDismissed(context: Context): Boolean =
+        getPrefs(context).getBoolean("fan_warning_dismissed", false)
+
     // ========== 本地预估烈度阈值相关 ==========
 
     /**
@@ -73,8 +82,10 @@ object DataManager {
 
     // 🚨 提取默认源列表为私有方法，防止重复代码，方便容灾重置时统一调用
     private fun getDefaultSources() = listOf(
-        ApiSource("台湾地区中央气象署 (CWA)", "wss://ws-api.wolfx.jp/cwa_eew", true),
-        ApiSource("中国地震台网 (CENC)", "wss://ws-api.wolfx.jp/cenc_eew", false),
+        ApiSource("台湾地区中央气象署 (CWA. Wolfx API)", "wss://ws-api.wolfx.jp/cwa_eew", true),
+        ApiSource("中国地震预警网 (CEA, Wolfx API)", "wss://ws-api.wolfx.jp/cenc_eew", false),
+        ApiSource("台湾地区中央气象署 (CWA. FAN API)", "wss://ws.fanstudio.tech/cwa-eew", false),
+        ApiSource("中国地震预警网 (CEA, FAN API)", "wss://ws.fanstudio.tech/cea", false),
         ApiSource("福建地震局 (FJ)", "wss://ws-api.wolfx.jp/fj_eew", false),
         ApiSource("四川地震局 (SC)", "wss://ws-api.wolfx.jp/sc_eew", false),
         ApiSource("监控以上所有 (ALL)", "wss://ws-api.wolfx.jp/all_eew", false)
