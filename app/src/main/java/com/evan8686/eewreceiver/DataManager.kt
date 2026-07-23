@@ -8,7 +8,8 @@ import com.google.gson.Gson
 data class ApiSource(
     val name: String,
     val url: String,
-    var isSelected: Boolean
+    var isSelected: Boolean,
+    val isPredefined: Boolean = false // 🚨 新增：用于识别是否为系统预置节点，不再依赖 index
 )
 
 object DataManager {
@@ -80,15 +81,16 @@ object DataManager {
     fun getLocalIntensityThreshold(context: Context): Int =
         getPrefs(context).getInt("local_intensity_threshold", 0)
 
-    // 🚨 提取默认源列表为私有方法，防止重复代码，方便容灾重置时统一调用
+    // 🚨 提取默认源列表，并将 isPredefined 设为 true
     private fun getDefaultSources() = listOf(
-        ApiSource("台湾地区中央气象署 (CWA. Wolfx API)", "wss://ws-api.wolfx.jp/cwa_eew", true),
-        ApiSource("中国地震预警网 (CEA, Wolfx API)", "wss://ws-api.wolfx.jp/cenc_eew", false),
-        ApiSource("台湾地区中央气象署 (CWA. FAN API)", "wss://ws.fanstudio.tech/cwa-eew", false),
-        ApiSource("中国地震预警网 (CEA, FAN API)", "wss://ws.fanstudio.tech/cea", false),
-        ApiSource("福建地震局 (FJ)", "wss://ws-api.wolfx.jp/fj_eew", false),
-        ApiSource("四川地震局 (SC)", "wss://ws-api.wolfx.jp/sc_eew", false),
-        ApiSource("监控以上所有 (ALL)", "wss://ws-api.wolfx.jp/all_eew", false)
+        ApiSource("台湾地区中央气象署 (CWA, Wolfx API)", "wss://ws-api.wolfx.jp/cwa_eew", true, true),
+        ApiSource("中国地震预警网 (CEA, Wolfx API)", "wss://ws-api.wolfx.jp/cenc_eew", false, true),
+        ApiSource("台湾地区中央气象署 (CWA, FAN API)", "wss://ws.fanstudio.tech/cwa-eew", false, true),
+        ApiSource("中国地震预警网 (CEA, FAN API)", "wss://ws.fanstudio.tech/cea", false, true),
+        ApiSource("福建地震局 (FJ, Wolfx API)", "wss://ws-api.wolfx.jp/fj_eew", false, true),
+        ApiSource("四川地震局 (SC, Wolfx API)", "wss://ws-api.wolfx.jp/sc_eew", false, true),
+        ApiSource("日本気象庁 (JMA, Wolfx API)", "wss://ws-api.wolfx.jp/jma_eew", false, true),
+        ApiSource("监控以上所有Wolfx节点 (勾选此项时建议取消上方选项)", "wss://ws-api.wolfx.jp/all_eew", false, true)
     )
 
     // 🚨 加上 @Synchronized 锁，防止多线程并发保存时文件损坏
@@ -98,23 +100,42 @@ object DataManager {
         getPrefs(context).edit().putString("api_sources", json).apply()
     }
 
-    // 🚨 加上锁和 try-catch 容灾兜底：哪怕本地 JSON 损坏、混淆被擦除，也绝不闪退！
+    /**
+     * 核心重构：实现“代码骨架 + 存储记忆”的智能合并逻辑
+     * 1. 以当前代码中定义的最新 getDefaultSources() 为准
+     * 2. 如果存过相同的 URL，则继承用户之前的 isSelected 状态
+     * 3. 自动保留用户添加的自定义源
+     */
     @Synchronized
     fun getSources(context: Context): List<ApiSource> {
+        val latestPredefined = getDefaultSources()
+        
         return try {
             val json = getPrefs(context).getString("api_sources", null)
-            if (json != null) {
-                // 🚨 核心修复：降维打击，直接用实体数组 Array 接收解析，彻底无视泛型擦除
-                val array = gson.fromJson(json, Array<ApiSource>::class.java)
-                array.toList() // 顺手转回 List 喂给外部调用者
+            if (json == null) {
+                latestPredefined
             } else {
-                getDefaultSources()
+                val savedList = gson.fromJson(json, Array<ApiSource>::class.java).toList()
+                
+                // 1. 建立 URL -> isSelected 的快速映射表
+                val selectionMap = savedList.associate { it.url to it.isSelected }
+                
+                // 2. 更新最新预置列表的状态（保留用户勾选，同时自动识别新节点和新名称）
+                val mergedPredefined = latestPredefined.map { predefined ->
+                    val wasSelected = selectionMap[predefined.url] ?: predefined.isSelected
+                    predefined.copy(isSelected = wasSelected)
+                }
+                
+                // 3. 提取旧数据中的自定义节点（不属于预置 URL 的项）
+                val predefinedUrls = latestPredefined.map { it.url }.toSet()
+                val customSources = savedList.filter { it.url !in predefinedUrls && !it.isPredefined }
+                
+                // 4. 合并并返回
+                mergedPredefined + customSources
             }
         } catch (e: Exception) {
-            // 存储数据损坏时（如混淆导致字段错乱），清空"毒数据"，自动重置为默认值，App 强行续命活下来
-            Log.e("EEW_Receiver", "订阅源数据解析失败，已重置为默认值: ${e.message}")
-            getPrefs(context).edit().remove("api_sources").apply()
-            getDefaultSources()
+            Log.e("EEW_Receiver", "解析订阅源失败，恢复默认值: ${e.message}")
+            latestPredefined
         }
     }
 
@@ -159,6 +180,17 @@ object DataManager {
             // 存储数据损坏时，记录日志并返回空列表，保证 App 不崩溃
             Log.e("EEW_Receiver", "历史记录解析失败，已重置为空: ${e.message}")
             emptyList()
+        }
+    }
+
+    @Synchronized
+    fun deleteHistoryItem(context: Context, id: String) {
+        val history = getHistory(context).toMutableList()
+        val index = history.indexOfFirst { it.id == id }
+        if (index != -1) {
+            history.removeAt(index)
+            val json = gson.toJson(history)
+            getPrefs(context).edit().putString("eew_history", json).apply()
         }
     }
 }

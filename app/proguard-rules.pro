@@ -22,6 +22,14 @@
 -keep class com.evan8686.eewreceiver.ApiSource { *; }
 -keep class com.evan8686.eewreceiver.AlertUiData { *; }
 
+# 🚨 2.1.0 新增：保护远程配置与好物推荐模型（防止 Gson 匹配字段名失败）
+-keep class com.evan8686.eewreceiver.UpdateInfo { *; }
+-keep class com.evan8686.eewreceiver.NoticeInfo { *; }
+-keep class com.evan8686.eewreceiver.RemoteConfig { *; }
+-keep class com.evan8686.eewreceiver.RecommendationResponse { *; }
+-keep class com.evan8686.eewreceiver.RecommendationCategory { *; }
+-keep class com.evan8686.eewreceiver.RecommendationItem { *; }
+
 # -----------------------------------------------------------------------------
 # 3. 反射与泛型支持（防止 TypeToken 泛型擦除导致 List 解析崩溃）
 # -----------------------------------------------------------------------------
@@ -80,3 +88,5 @@
 -keep class com.evan8686.eewreceiver.DataManager { *; }
 -keep class com.evan8686.eewreceiver.EarthquakeCalculator { *; }
 -keep class com.evan8686.eewreceiver.AlertManager { *; }
+-keep class com.evan8686.eewreceiver.RemoteConfigManager { *; }
+-keep class com.evan8686.eewreceiver.DownloadCompleteReceiver { *; }
