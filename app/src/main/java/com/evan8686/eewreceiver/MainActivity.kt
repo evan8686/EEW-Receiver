@@ -434,50 +434,54 @@ fun SettingsScreen(onCheckUpdate: () -> Unit) {
 
                 AnimatedVisibility(visible = sourcesExpanded) {
                     Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-                        sourceList.forEachIndexed { index, source ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .combinedClickable(
-                                        onClick = {
+                        sourceList.filter { !it.isHidden }.forEachIndexed { index, source ->
+                            // 重新获取在原列表中的真实索引，用于更新状态
+                            val realIndex = sourceList.indexOf(source)
+                            if (realIndex != -1) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .combinedClickable(
+                                            onClick = {
+                                                val newList = sourceList.toMutableList()
+                                                val newIsSelected = !source.isSelected
+                                                newList[realIndex] = source.copy(isSelected = newIsSelected)
+                                                sourceList = newList
+
+                                                if (newIsSelected && source.name.contains("FAN API") && !DataManager.isFanWarningDismissed(context)) {
+                                                    showFanWarningDialog = true
+                                                }
+                                            },
+                                            onLongClick = {
+                                                if (!source.isPredefined) {
+                                                    sourceToDelete = source
+                                                } else {
+                                                    Toast.makeText(context, "预置节点无法删除", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        )
+                                        .padding(vertical = 6.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = source.isSelected,
+                                        onCheckedChange = { isChecked ->
                                             val newList = sourceList.toMutableList()
-                                            val newIsSelected = !source.isSelected
-                                            newList[index] = source.copy(isSelected = newIsSelected)
+                                            newList[realIndex] = source.copy(isSelected = isChecked)
                                             sourceList = newList
 
-                                            if (newIsSelected && source.name.contains("FAN API") && !DataManager.isFanWarningDismissed(context)) {
+                                            if (isChecked && source.name.contains("FAN API") && !DataManager.isFanWarningDismissed(context)) {
                                                 showFanWarningDialog = true
-                                            }
-                                        },
-                                        onLongClick = {
-                                            if (!source.isPredefined) {
-                                                sourceToDelete = source
-                                            } else {
-                                                Toast.makeText(context, "预置节点无法删除", Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                     )
-                                    .padding(vertical = 6.dp)
-                            ) {
-                                Checkbox(
-                                    checked = source.isSelected,
-                                    onCheckedChange = { isChecked ->
-                                        val newList = sourceList.toMutableList()
-                                        newList[index] = source.copy(isSelected = isChecked)
-                                        sourceList = newList
-
-                                        if (isChecked && source.name.contains("FAN API") && !DataManager.isFanWarningDismissed(context)) {
-                                            showFanWarningDialog = true
+                                    Column(modifier = Modifier.padding(start = 8.dp)) {
+                                        Text(source.name, style = MaterialTheme.typography.bodyMedium)
+                                        if (!source.isPredefined) {
+                                            Text("自定义源 (长按可删除)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                        } else {
+                                            Text("预置节点", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
                                         }
-                                    }
-                                )
-                                Column(modifier = Modifier.padding(start = 8.dp)) {
-                                    Text(source.name, style = MaterialTheme.typography.bodyMedium)
-                                    if (!source.isPredefined) {
-                                        Text("自定义源 (长按可删除)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                                    } else {
-                                        Text("预置节点", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
                                     }
                                 }
                             }

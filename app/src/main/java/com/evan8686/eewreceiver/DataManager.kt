@@ -9,7 +9,8 @@ data class ApiSource(
     val name: String,
     val url: String,
     var isSelected: Boolean,
-    val isPredefined: Boolean = false // 🚨 新增：用于识别是否为系统预置节点，不再依赖 index
+    val isPredefined: Boolean = false, // 🚨 新增：用于识别是否为系统预置节点，不再依赖 index
+    val isHidden: Boolean = false // 🚨 新增：用于标记是否隐藏节点
 )
 
 object DataManager {
@@ -85,8 +86,8 @@ object DataManager {
     private fun getDefaultSources() = listOf(
         ApiSource("台湾地区中央气象署 (CWA, Wolfx API)", "wss://ws-api.wolfx.jp/cwa_eew", true, true),
         ApiSource("中国地震预警网 (CEA, Wolfx API)", "wss://ws-api.wolfx.jp/cenc_eew", false, true),
-        ApiSource("台湾地区中央气象署 (CWA, FAN API)", "wss://ws.fanstudio.tech/cwa-eew", false, true),
-        ApiSource("中国地震预警网 (CEA, FAN API)", "wss://ws.fanstudio.tech/cea", false, true),
+        ApiSource("台湾地区中央气象署 (CWA, FAN API)", "wss://ws.fanstudio.tech/cwa-eew", false, true, isHidden = true),
+        ApiSource("中国地震预警网 (CEA, FAN API)", "wss://ws.fanstudio.tech/cea", false, true, isHidden = true),
         ApiSource("福建地震局 (FJ, Wolfx API)", "wss://ws-api.wolfx.jp/fj_eew", false, true),
         ApiSource("四川地震局 (SC, Wolfx API)", "wss://ws-api.wolfx.jp/sc_eew", false, true),
         ApiSource("日本気象庁 (JMA, Wolfx API)", "wss://ws-api.wolfx.jp/jma_eew", false, true),
@@ -123,6 +124,7 @@ object DataManager {
                 // 2. 更新最新预置列表的状态（保留用户勾选，同时自动识别新节点和新名称）
                 val mergedPredefined = latestPredefined.map { predefined ->
                     val wasSelected = selectionMap[predefined.url] ?: predefined.isSelected
+                    // 🚨 核心逻辑：isHidden 必须以代码中最新的定义为准，强制覆盖存储中的旧状态
                     predefined.copy(isSelected = wasSelected)
                 }
                 

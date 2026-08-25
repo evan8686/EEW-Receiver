@@ -44,7 +44,8 @@ class EewForegroundService : Service() {
 
         startForeground(1, notification)
 
-        val activeSources = DataManager.getSources(this).filter { it.isSelected }
+        // 🚨 核心逻辑：只有“被选中”且“未隐藏”的源才允许建立 WebSocket 连接
+        val activeSources = DataManager.getSources(this).filter { it.isSelected && !it.isHidden }
 
         if (activeSources.isEmpty()) {
             Log.w("EEW_Receiver", "没有勾选任何数据源！")
@@ -145,8 +146,8 @@ class EewForegroundService : Service() {
                 webSocketManagers.forEach { it.disconnect() }
                 webSocketManagers.clear()
 
-                // 2. 读取刚被保存的新名单
-                val activeSources = DataManager.getSources(this).filter { it.isSelected }
+                // 2. 读取刚被保存的新名单 (增加 !isHidden 过滤)
+                val activeSources = DataManager.getSources(this).filter { it.isSelected && !it.isHidden }
 
                 if (activeSources.isEmpty()) {
                     Log.w("EEW_Receiver", "热重载后发现没有勾选任何数据源！")
