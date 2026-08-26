@@ -290,7 +290,7 @@ class AlertManager(private val context: Context) {
             var playCount = 0
             player.setOnCompletionListener { mp ->
                 playCount++
-                if (playCount < 2 && !userSilenced) {
+                if (playCount < 4 && !userSilenced) {
                     mp.start()
                 } else {
                     mp.release()
