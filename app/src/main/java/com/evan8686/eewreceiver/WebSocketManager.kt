@@ -9,59 +9,65 @@ import java.util.concurrent.TimeUnit
 class WebSocketManager(
     private val sourceName: String,
     private val url: String,
+    private val onStatusChanged: (ConnectionStatus, Long) -> Unit, // 🚨 新增：状态与活跃时间回调
     private val onMessageReceived: (String) -> Unit
 ) {
     private var webSocket: WebSocket? = null
 
     // 🚨 核心修复 1：添加 @Volatile 保证多线程可见性
-    // 强制所有线程（包括主线程和 OkHttp 后台线程）直接从主内存读写该变量，拒绝 CPU 缓存导致的信息差
     @Volatile private var isClosedByUser = false
+    @Volatile private var reconnectAttemptCount = 0 
 
-    @Volatile private var reconnectAttemptCount = 0 // 记录重连次数
-
-    // 🚨 核心修复 2：将 Handler 和重连任务 (Runnable) 声明为成员变量
-    // 这样我们手里就有了"遥控器"，随时可以取消它
     private val reconnectHandler = Handler(Looper.getMainLooper())
     private val reconnectRunnable = Runnable {
         if (!isClosedByUser) connect()
     }
 
-    // 🚨 终极架构修复：使用 companion object 将 OkHttpClient 提升为全局单例
-    // 配置心跳包：每 30 秒自动发送 ping，这是最省电的保活方式
-    // 无论勾选几个源，全 App 共享这一个 Client，复用底层线程池和连接池，彻底杜绝内存/线程泄漏
     companion object {
         private val sharedClient = OkHttpClient.Builder()
-            .pingInterval(30, TimeUnit.SECONDS)
+            .pingInterval(15, TimeUnit.SECONDS) // ⚡ 优化：缩短至 15s 更快发现死链
             .build()
     }
 
     fun connect() {
         isClosedByUser = false
+        onStatusChanged(ConnectionStatus.CONNECTING, 0L) // 通知正在连接
+        
         val request = Request.Builder().url(url).build()
 
-        // 使用全局单例 sharedClient 创建 WebSocket 连接
         webSocket = sharedClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 super.onOpen(webSocket, response)
-                Log.d("EEW_Receiver", "[$sourceName] WebSocket 已连接: $url")
-                reconnectAttemptCount = 0 // 连接成功，重置重连次数
+                reconnectAttemptCount = 0 
+                // 💡 Wolfx 连上即发心跳，此处同步更新状态和活跃时间
+                onStatusChanged(ConnectionStatus.CONNECTED, System.currentTimeMillis())
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 super.onMessage(webSocket, text)
+                // ⚡ 只要有消息（含心跳），就证明活着
+                onStatusChanged(ConnectionStatus.CONNECTED, System.currentTimeMillis())
                 onMessageReceived(text)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 super.onClosed(webSocket, code, reason)
-                Log.d("EEW_Receiver", "[$sourceName] 连接关闭: $reason")
-                if (!isClosedByUser) scheduleReconnect()
+                if (!isClosedByUser) {
+                    onStatusChanged(ConnectionStatus.RECONNECTING, 0L)
+                    scheduleReconnect()
+                } else {
+                    onStatusChanged(ConnectionStatus.DISCONNECTED, 0L)
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 super.onFailure(webSocket, t, response)
-                Log.e("EEW_Receiver", "[$sourceName] 连接异常断开: ${t.message}")
-                if (!isClosedByUser) scheduleReconnect()
+                if (!isClosedByUser) {
+                    onStatusChanged(ConnectionStatus.RECONNECTING, 0L)
+                    scheduleReconnect()
+                } else {
+                    onStatusChanged(ConnectionStatus.DISCONNECTED, 0L)
+                }
             }
         })
     }

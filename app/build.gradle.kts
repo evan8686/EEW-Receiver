@@ -17,8 +17,8 @@ android {
         applicationId = "com.evan8686.eewreceiver"
         minSdk = 24
         targetSdk = 36
-        versionCode = 19
-        versionName = "2.2.5"
+        versionCode = 22
+        versionName = "2.2.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

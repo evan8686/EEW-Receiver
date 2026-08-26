@@ -12,12 +12,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -40,9 +42,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.google.gson.Gson
+import com.evan8686.eewreceiver.ui.theme.EEWReceiverTheme
 import com.google.gson.annotations.SerializedName
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -64,9 +68,17 @@ class MainActivity : ComponentActivity() {
     private var displayUpdateDialog by mutableStateOf(false)
     private var displayNoticeDialog by mutableStateOf(false)
 
+    // 主题状态
+    private var themeMode by mutableIntStateOf(0)
+    private var useDynamicColor by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // 加载主题设置
+        themeMode = DataManager.getThemeMode(this)
+        useDynamicColor = DataManager.getDynamicColor(this)
+
         // 监听生命周期，回到前台时检查配置
         lifecycle.addObserver(object : LifecycleEventObserver {
             override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
@@ -86,15 +98,27 @@ class MainActivity : ComponentActivity() {
             startEewService()
         }
         setContent { 
-            MainScreen(
-                updateInfo = updateState,
-                noticeInfo = noticeState,
-                showUpdate = displayUpdateDialog,
-                showNotice = displayNoticeDialog,
-                onUpdateDismiss = { displayUpdateDialog = false },
-                onNoticeDismiss = { displayNoticeDialog = false },
-                onCheckUpdate = { checkRemoteConfig(isManual = true) }
-            ) 
+            EEWReceiverTheme(themeMode = themeMode, dynamicColor = useDynamicColor) {
+                MainScreen(
+                    updateInfo = updateState,
+                    noticeInfo = noticeState,
+                    showUpdate = displayUpdateDialog,
+                    showNotice = displayNoticeDialog,
+                    onUpdateDismiss = { displayUpdateDialog = false },
+                    onNoticeDismiss = { displayNoticeDialog = false },
+                    onCheckUpdate = { checkRemoteConfig(isManual = true) },
+                    themeMode = themeMode,
+                    onThemeModeChange = { 
+                        themeMode = it
+                        DataManager.saveThemeMode(this, it)
+                    },
+                    dynamicColor = useDynamicColor,
+                    onDynamicColorChange = {
+                        useDynamicColor = it
+                        DataManager.saveDynamicColor(this, it)
+                    }
+                ) 
+            }
         }
     }
 
@@ -177,7 +201,11 @@ fun MainScreen(
     showNotice: Boolean,
     onUpdateDismiss: () -> Unit,
     onNoticeDismiss: () -> Unit,
-    onCheckUpdate: () -> Unit
+    onCheckUpdate: () -> Unit,
+    themeMode: Int,
+    onThemeModeChange: (Int) -> Unit,
+    dynamicColor: Boolean,
+    onDynamicColorChange: (Boolean) -> Unit
 ) {
     var selectedItem by remember { mutableIntStateOf(0) }
     val items = listOf("最近地震", "设置")
@@ -266,7 +294,13 @@ fun MainScreen(
             if (selectedItem == 0) {
                 HistoryScreen()
             } else {
-                SettingsScreen(onCheckUpdate = onCheckUpdate)
+                SettingsScreen(
+                    onCheckUpdate = onCheckUpdate,
+                    themeMode = themeMode,
+                    onThemeModeChange = onThemeModeChange,
+                    dynamicColor = dynamicColor,
+                    onDynamicColorChange = onDynamicColorChange
+                )
             }
         }
     }
@@ -341,7 +375,13 @@ fun HistoryScreen() {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SettingsScreen(onCheckUpdate: () -> Unit) {
+fun SettingsScreen(
+    onCheckUpdate: () -> Unit,
+    themeMode: Int,
+    onThemeModeChange: (Int) -> Unit,
+    dynamicColor: Boolean,
+    onDynamicColorChange: (Boolean) -> Unit
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
 
@@ -433,8 +473,16 @@ fun SettingsScreen(onCheckUpdate: () -> Unit) {
                 }
 
                 AnimatedVisibility(visible = sourcesExpanded) {
+                    // 🕒 2.2.1 优化：仅在列表展开时开启秒表，驱动计时器实时刷新。折叠或应用在后台时自动停止，实现零功耗。
+                    val currentTime by produceState(initialValue = System.currentTimeMillis()) {
+                        while (true) {
+                            delay(15000) // ⚡ 优化：改为每 15 秒刷新一次，大幅降低 UI 重绘频率，兼顾省电与状态可见性
+                            value = System.currentTimeMillis()
+                        }
+                    }
+
                     Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-                        sourceList.filter { !it.isHidden }.forEachIndexed { index, source ->
+                        sourceList.filter { !it.isHidden }.forEach { source ->
                             // 重新获取在原列表中的真实索引，用于更新状态
                             val realIndex = sourceList.indexOf(source)
                             if (realIndex != -1) {
@@ -445,12 +493,16 @@ fun SettingsScreen(onCheckUpdate: () -> Unit) {
                                         .combinedClickable(
                                             onClick = {
                                                 val newList = sourceList.toMutableList()
-                                                val newIsSelected = !source.isSelected
-                                                newList[realIndex] = source.copy(isSelected = newIsSelected)
-                                                sourceList = newList
+                                                // 💡 核心修复：改用 URL 查找索引，彻底解决自定义源取消勾选时 -1 索引导致的闪退
+                                                val indexInList = newList.indexOfFirst { it.url == source.url }
+                                                if (indexInList != -1) {
+                                                    val newIsSelected = !source.isSelected
+                                                    newList[indexInList] = source.copy(isSelected = newIsSelected)
+                                                    sourceList = newList
 
-                                                if (newIsSelected && source.name.contains("FAN API") && !DataManager.isFanWarningDismissed(context)) {
-                                                    showFanWarningDialog = true
+                                                    if (newIsSelected && source.name.contains("FAN API") && !DataManager.isFanWarningDismissed(context)) {
+                                                        showFanWarningDialog = true
+                                                    }
                                                 }
                                             },
                                             onLongClick = {
@@ -467,21 +519,71 @@ fun SettingsScreen(onCheckUpdate: () -> Unit) {
                                         checked = source.isSelected,
                                         onCheckedChange = { isChecked ->
                                             val newList = sourceList.toMutableList()
-                                            newList[realIndex] = source.copy(isSelected = isChecked)
-                                            sourceList = newList
+                                            val indexInList = newList.indexOfFirst { it.url == source.url }
+                                            if (indexInList != -1) {
+                                                newList[indexInList] = source.copy(isSelected = isChecked)
+                                                sourceList = newList
 
-                                            if (isChecked && source.name.contains("FAN API") && !DataManager.isFanWarningDismissed(context)) {
-                                                showFanWarningDialog = true
+                                                if (isChecked && source.name.contains("FAN API") && !DataManager.isFanWarningDismissed(context)) {
+                                                    showFanWarningDialog = true
+                                                }
                                             }
                                         }
                                     )
-                                    Column(modifier = Modifier.padding(start = 8.dp)) {
-                                        Text(source.name, style = MaterialTheme.typography.bodyMedium)
-                                        if (!source.isPredefined) {
-                                            Text("自定义源 (长按可删除)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                                        } else {
-                                            Text("预置节点", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
+                                    // 🚨 2.2.0 新增：连接健康度指示灯
+                                    val connectionMap by EewForegroundService.connectionStates.collectAsState()
+                                    val currentSourceState = connectionMap[source.url]
+                                    
+                                    val indicatorColor = when {
+                                        !source.isSelected -> androidx.compose.ui.graphics.Color.Gray
+                                        currentSourceState == null -> androidx.compose.ui.graphics.Color.Gray
+                                        else -> {
+                                            val diff = (currentTime - currentSourceState.lastActiveTime) / 1000
+                                            when {
+                                                currentSourceState.connectionStatus != ConnectionStatus.CONNECTED -> androidx.compose.ui.graphics.Color.Yellow
+                                                diff <= 120 -> androidx.compose.ui.graphics.Color(0xFF4CAF50) // 🟢 绿灯
+                                                diff <= 180 -> androidx.compose.ui.graphics.Color(0xFFFFC107) // 🟡 黄灯
+                                                else -> androidx.compose.ui.graphics.Color(0xFFF44336) // 🔴 红灯
+                                            }
                                         }
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(indicatorColor, shape = CircleShape)
+                                    )
+
+                                    Column(modifier = Modifier.padding(start = 12.dp)) {
+                                        Text(source.name, style = MaterialTheme.typography.bodyMedium)
+                                        
+                                        // 活跃时间文字逻辑
+                                        val statusText = if (!source.isSelected) {
+                                            if (!source.isPredefined) "自定义源 (长按可删除)" else "预置节点"
+                                        } else {
+                                            when {
+                                                currentSourceState == null -> "待保存生效" // 💡 优化：明确告知用户需要点击保存按钮
+                                                currentSourceState.connectionStatus == ConnectionStatus.CONNECTING -> "正在连接..."
+                                                currentSourceState.connectionStatus == ConnectionStatus.RECONNECTING -> "正在重连..."
+                                                currentSourceState.lastActiveTime == 0L -> "已连接 · 等待心跳..."
+                                                else -> {
+                                                    val diff = (currentTime - currentSourceState.lastActiveTime) / 1000
+                                                    "已连接 · ${diff}s 前活跃"
+                                                }
+                                            }
+                                        }
+
+                                        Text(
+                                            text = statusText,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (currentSourceState == null && source.isSelected) {
+                                                MaterialTheme.colorScheme.primary // 待保存状态使用主色调提醒
+                                            } else if (indicatorColor == androidx.compose.ui.graphics.Color(0xFFF44336) && source.isSelected) {
+                                                MaterialTheme.colorScheme.error 
+                                            } else {
+                                                MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                                            }
+                                        )
                                     }
                                 }
                             }
@@ -737,6 +839,54 @@ fun SettingsScreen(onCheckUpdate: () -> Unit) {
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
                     Text("3秒后模拟触发 7.0 级预警")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // ================= 界面显示 =================
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("界面显示", style = MaterialTheme.typography.titleMedium)
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("主题模式", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    val modes = listOf("跟随系统", "浅色模式", "深色模式")
+                    modes.forEachIndexed { index, name ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { onThemeModeChange(index) }
+                        ) {
+                            RadioButton(
+                                selected = themeMode == index,
+                                onClick = { onThemeModeChange(index) }
+                            )
+                            Text(name, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { onDynamicColorChange(!dynamicColor) },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("动态色彩 (Material You)", style = MaterialTheme.typography.bodyMedium)
+                        Text("优先使用桌面壁纸提取的基色（仅 Android 12+）", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    }
+                    Switch(
+                        checked = dynamicColor,
+                        onCheckedChange = { onDynamicColorChange(it) }
+                    )
                 }
             }
         }

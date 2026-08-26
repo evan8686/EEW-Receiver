@@ -10,8 +10,15 @@ data class ApiSource(
     val url: String,
     var isSelected: Boolean,
     val isPredefined: Boolean = false, // 🚨 新增：用于识别是否为系统预置节点，不再依赖 index
-    val isHidden: Boolean = false // 🚨 新增：用于标记是否隐藏节点
+    val isHidden: Boolean = false, // 🚨 新增：用于标记是否隐藏节点
+    // 🌐 2.2.0 连接监控新增字段
+    var lastActiveTime: Long = 0L,
+    var connectionStatus: ConnectionStatus = ConnectionStatus.DISCONNECTED
 )
+
+enum class ConnectionStatus {
+    CONNECTING, CONNECTED, RECONNECTING, DISCONNECTED
+}
 
 object DataManager {
     private const val PREF_NAME = "eew_prefs"
@@ -81,6 +88,27 @@ object DataManager {
      */
     fun getLocalIntensityThreshold(context: Context): Int =
         getPrefs(context).getInt("local_intensity_threshold", 0)
+
+    // ========== 主题设置相关 ==========
+
+    /** 
+     * 保存主题模式
+     * 0: 跟随系统, 1: 浅色模式, 2: 深色模式
+     */
+    fun saveThemeMode(context: Context, mode: Int) {
+        getPrefs(context).edit().putInt("theme_mode", mode).apply()
+    }
+
+    fun getThemeMode(context: Context): Int =
+        getPrefs(context).getInt("theme_mode", 0)
+
+    /** 保存是否启用动态色彩 */
+    fun saveDynamicColor(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean("dynamic_color", enabled).apply()
+    }
+
+    fun getDynamicColor(context: Context): Boolean =
+        getPrefs(context).getBoolean("dynamic_color", false)
 
     // 🚨 提取默认源列表，并将 isPredefined 设为 true
     private fun getDefaultSources() = listOf(
