@@ -27,10 +27,7 @@
 ---
 ### 📱 应用截图
 
-<p align="left">
-  <img src="assets/Screenshot_EEW.png" height="650" />
-</p>
-
+![应用截图](assets/Screenshot_EEW.png)
 
 从左至右：强震全屏弹窗/订阅源列表/阈值设置功能/系统测试和其他/最近地震列表
 
